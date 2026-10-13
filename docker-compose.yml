@@ -1,0 +1,60 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: careerpilot
+      POSTGRES_USER: careerpilot
+      POSTGRES_PASSWORD: careerpilot
+    ports:
+      - "5432:5432"
+    volumes:
+      - careerpilot_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U careerpilot -d careerpilot"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - careerpilot_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+  email-worker:
+    build: ./backend
+    profiles: ["email"]
+    env_file: .env
+    environment:
+      DATABASE_HOST_OVERRIDE: postgres
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+  email-scheduler:
+    build: ./backend
+    profiles: ["email"]
+    env_file: .env
+    environment:
+      DATABASE_HOST_OVERRIDE: postgres
+      REDIS_URL: redis://redis:6379/0
+    command: ["uv", "run", "--no-sync", "celery", "-A", "app.workers.email:celery_app", "beat", "--loglevel=INFO", "--schedule=/tmp/careerpilot-celerybeat"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  careerpilot_postgres:
+  careerpilot_redis:

@@ -1,0 +1,39 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# JavaScript
+frontend/node_modules/
+frontend/.next/
+frontend/.next-dev/
+frontend/out/
+frontend/coverage/
+frontend/next-env.d.ts
+.vercel/
+frontend/.vercel/
+backend/.vercel/
+
+# Python
+backend/.venv/
+backend/.pytest_cache/
+backend/.coverage
+backend/.ruff_cache/
+backend/**/__pycache__/
+backend/**/*.py[cod]
+
+# Database and generated files
+*.sqlite3
+*.db
+*.dump
+*.log
+*.pdf
+storage/
+.checkpoints/
+.runtime/
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
