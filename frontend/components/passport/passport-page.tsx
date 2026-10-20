@@ -280,16 +280,18 @@ export function PassportPage() {
         <div>
           <Link className="inline-flex items-center gap-2 text-sm font-medium text-muted hover:text-ink" href="/"><ArrowLeft className="size-4" aria-hidden="true" /> Home</Link>
           <p className="mt-7 text-sm font-semibold uppercase tracking-[0.16em] text-brand">Career Passport</p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-[-0.03em] text-ink sm:text-4xl">Your professional source of truth.</h1>
-          <p className="mt-3 max-w-2xl leading-7 text-muted">Keep the information you choose to share accurate, structured, and ready for future career work. Your first draft resume is created automatically when you save a detail.</p>
+          <h1 className="mt-2 text-3xl font-semibold tracking-[-0.03em] text-ink sm:text-4xl">Your career, at your own pace.</h1>
+          <p className="mt-3 max-w-2xl leading-7 text-muted">This profile is optional. Add only what helps your next move. You don’t need to complete every section to check or import a resume.</p>
           <Link className="mt-4 inline-flex text-sm font-semibold text-brand hover:text-indigo-700" href="/resumes">Open your resumes <span aria-hidden="true">→</span></Link>
         </div>
         <div className="min-w-56 rounded-xl border border-line bg-white p-4 shadow-panel" aria-label={`Passport completeness ${passport.completeness} percent`}>
           <div className="flex items-center justify-between text-sm"><span className="font-medium text-ink">Passport completeness</span><span className="font-semibold text-brand">{passport.completeness}%</span></div>
           <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-brand transition-all" style={{ width: `${passport.completeness}%` }} /></div>
-          <p className="mt-2 text-xs text-muted">Only fields you provide count toward this indicator.</p>
+          <p className="mt-2 text-xs text-muted">Optional section coverage, not a resume quality score.</p>
         </div>
       </header>
+
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-emerald-200 bg-emerald-50 p-5"><div><h2 className="font-semibold text-emerald-950">Already have a resume? Skip the forms.</h2><p className="mt-1 text-sm leading-6 text-emerald-800">Upload it, check what’s working, and save an editable draft.</p></div><Button asChild><Link href="/review">Start with my resume →</Link></Button></div>
 
       {notice && <div className="mt-6"><Message tone="success"><Check className="size-4" aria-hidden="true" />{notice}</Message></div>}
 

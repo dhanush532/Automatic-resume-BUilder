@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.router import api_router
 from app.core.config import get_settings
+from app.core.request_limits import ReviewBodyLimit
 
 
 @asynccontextmanager
@@ -28,6 +29,7 @@ def create_application() -> FastAPI:
         redoc_url=None,
         lifespan=lifespan,
     )
+    app.add_middleware(ReviewBodyLimit, prefix=f"{settings.api_prefix}/review")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[settings.frontend_origin],

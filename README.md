@@ -1,5 +1,11 @@
 # CareerPilot
 
+## Resume-first experience
+
+The public `/review` workspace accepts PDF, DOCX, and UTF-8 TXT resumes (up to 3 MB), or pasted text. Visitors can review extraction, run an explained readiness checklist, compare recognized skills with an optional job description, edit, and download a text-searchable PDF before signing up. Signing in enables private saved resumes and version history. Career Passport forms are optional for this flow.
+
+The landing page and feedback use GSAP with scoped React cleanup and reduced-motion support. Signup shows configured social providers and offers email registration only when transactional delivery is configured. See [RESUME_FIRST_RELEASE.md](RESUME_FIRST_RELEASE.md) for architecture, limits, validation, and deployment details.
+
 Public deployment: [DEPLOYMENT_VERCEL.md](DEPLOYMENT_VERCEL.md). Import `frontend` and `backend` as separate Vercel projects; PostgreSQL, Redis and the existing Celery worker/scheduler also need hosted services. Never upload `.env` or database backups.
 
 Authentication/email upgrade setup: [AUTHENTICATION_AND_EMAIL.md](AUTHENTICATION_AND_EMAIL.md). Phone is now optional and non-unique, local numbers use a selected country, and registration uses browser-bound email OTPs. Redis/Celery process an encrypted database outbox. Real Resend sender/key and OAuth app credentials still need configuration; these integrations are not claimed live-verified.
@@ -47,6 +53,8 @@ Sync is manual; no scheduler is installed. Successful syncs have a six-hour cool
 frontend: npm run lint
 frontend: npm run typecheck
 frontend: npm run build
+frontend: npm test
+frontend: npm run test:e2e
 backend:  uv run ruff check .
 backend:  uv run pytest
 backend:  uv run alembic check

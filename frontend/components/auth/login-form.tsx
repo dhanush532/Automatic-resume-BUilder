@@ -26,6 +26,9 @@ export function LoginForm() {
         body: JSON.stringify({ identifier: form.get("identifier"), password: form.get("password") }),
       });
       setUser(result);
+      let destination = "/resumes";
+      try { if (sessionStorage.getItem("careerpilot-review-draft")) destination = "/review"; } catch {}
+      window.location.assign(destination);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to sign in.");
     } finally {
@@ -36,8 +39,8 @@ export function LoginForm() {
   if (user) {
     return (
       <div className="space-y-5">
-        <AuthAlert tone="success">Signed in as {user.full_name}. Your server-side session is active.</AuthAlert>
-        <Button className="w-full" onClick={() => { window.location.href = "/passport"; }}>Open Career Passport</Button>
+        <AuthAlert tone="success">Welcome back, {user.full_name}. Opening your workspace…</AuthAlert>
+        <Button className="w-full" asChild><Link href="/resumes">Open my resumes</Link></Button>
       </div>
     );
   }

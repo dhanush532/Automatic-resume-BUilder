@@ -20,7 +20,6 @@ function ProviderIcon({ provider }: { provider: string }) {
 }
 
 export function SocialButtons({ mode = "login", connected = [], termsAccepted = false }: { mode?: "login" | "link" | "reauth"; connected?: string[]; termsAccepted?: boolean }) {
-  // Render all icons even while offline, but never enable an unchecked provider.
   const [providers, setProviders] = useState<Provider[]>(() => providerNames.map((name) => ({ name, configured: false })));
   const [availability, setAvailability] = useState<"checking" | "ready" | "unavailable">("checking");
   const [error, setError] = useState<string>();
@@ -43,17 +42,17 @@ export function SocialButtons({ mode = "login", connected = [], termsAccepted = 
     catch (caught) { setError(caught instanceof Error ? caught.message : "Could not start provider authentication."); setBusy(undefined); }
   }
   return <div className="space-y-3">{error && <AuthAlert>{error}</AuthAlert>}
-    <div className={mode === "login" ? "flex justify-center gap-4" : "space-y-3"}>
-      {providers.filter((provider) => mode !== "reauth" || connected.includes(provider.name)).map((provider) => {
+    <div className="space-y-3">
+      {providers.filter((provider) => provider.configured && (mode !== "reauth" || connected.includes(provider.name))).map((provider) => {
         const name = provider.name === "github" ? "GitHub" : provider.name === "linkedin" ? "LinkedIn" : "Google";
         const label = `${mode === "link" ? "Connect" : mode === "reauth" ? "Reauthenticate with" : "Continue with"} ${name}`;
         const hint = availability === "checking" ? `Checking ${name} availability` : availability === "unavailable" ? `${name}: sign-in temporarily unavailable` : !provider.configured ? `${name}: provider setup required` : label;
         return <div key={provider.name} title={hint}>
           <Button type="button" variant="secondary" aria-label={busy === provider.name ? `Redirecting to ${name}` : label}
-            className={mode === "login" ? "h-12 w-12 rounded-full p-0 shadow-sm" : "w-full"}
+            className="h-12 w-full"
             disabled={availability !== "ready" || !provider.configured || !!busy || (mode === "link" && connected.includes(provider.name))} onClick={() => void start(provider.name)}>
             {busy === provider.name ? <LoaderCircle className="h-5 w-5 animate-spin" aria-hidden="true" /> : <ProviderIcon provider={provider.name} />}
-            {mode !== "login" && (busy === provider.name ? "Redirecting…" : label)}
+            {busy === provider.name ? "Redirecting…" : label}
           </Button>
           {mode !== "login" && availability === "ready" && !provider.configured && <p className="mt-1 text-xs text-muted">Provider setup required.</p>}
         </div>;
@@ -61,8 +60,8 @@ export function SocialButtons({ mode = "login", connected = [], termsAccepted = 
     </div>
     <div aria-live="polite" className="text-center text-xs text-muted">
       {availability === "checking" && <p>Checking social sign-in…</p>}
+      {availability === "ready" && !providers.some(provider => provider.configured) && <p>No social sign-in options are currently available.</p>}
       {availability === "unavailable" && <><p>Social sign-in is temporarily unavailable.</p><Button type="button" variant="ghost" className="mt-1 h-8 text-xs" onClick={() => void checkAvailability()}>Retry availability check</Button></>}
-      {availability === "ready" && mode === "login" && providers.some((provider) => !provider.configured) && <p>Unavailable providers still need to be configured.</p>}
     </div>
   </div>;
 }

@@ -41,9 +41,10 @@ class ResumeUpdate(BaseModel):
 
 
 class ResumeContentEdit(BaseModel):
+    imported_text: str | None = Field(default=None, min_length=80, max_length=60000)
     headline_override: str | None = Field(default=None, max_length=160)
     summary_override: str | None = Field(default=None, max_length=5000)
-    hidden_sections: list[str] = Field(default_factory=list, max_length=20)
+    hidden_sections: list[str] | None = Field(default=None, max_length=20)
     section_order: list[str] | None = Field(default=None, max_length=20)
 
     @field_validator("hidden_sections", "section_order")
@@ -74,6 +75,8 @@ class ResumeContentEdit(BaseModel):
 
 
 class ResumeVersionCreate(ResumeContentEdit):
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    template_id: UUID | None = None
     change_summary: str | None = Field(default=None, max_length=500)
 
 

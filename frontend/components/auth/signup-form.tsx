@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { OtpForm } from "@/components/auth/otp-form";
 import { SocialButtons } from "@/components/auth/social-buttons";
 
@@ -15,6 +15,8 @@ export function SignupForm() {
   const [user, setUser] = useState<PublicUser>();
   const [submitting, setSubmitting] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
+  const [emailAvailable, setEmailAvailable] = useState<boolean | null>(null);
+  useEffect(() => { void apiRequest<{email_delivery_configured: boolean}>("/auth/capabilities", { signal: AbortSignal.timeout(8000) }).then(value => setEmailAvailable(value.email_delivery_configured)).catch(() => setEmailAvailable(false)); }, []);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -45,15 +47,17 @@ export function SignupForm() {
   return (
     <form className="space-y-4" onSubmit={onSubmit}>
       {error && <AuthAlert>{error}</AuthAlert>}
+      <label className="flex items-start gap-3 text-sm leading-5 text-muted"><input className="mt-1 size-4 accent-brand" name="terms_accepted" required type="checkbox" checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} /><span>I agree to the <Link href="/terms" className="underline">terms</Link> and <Link href="/privacy" className="underline">privacy policy</Link>.</span></label>
+      <SocialButtons termsAccepted={termsAccepted} />
+      {!termsAccepted && <p className="text-center text-xs text-muted">Accept the terms above to create an account with your connected login.</p>}
+      {emailAvailable === null ? <p className="text-center text-xs text-muted" role="status">Checking email signup availability…</p> : emailAvailable ? <>
+      <p className="pt-3 text-center text-xs text-muted">Or create an account with email</p>
       <label className="block text-sm font-medium text-ink">Full name<Input autoComplete="name" className="mt-1.5" name="full_name" required /></label>
-      <label className="block text-sm font-medium text-ink">Username (optional)<Input autoComplete="username" className="mt-1.5" name="username" pattern="[A-Za-z0-9._-]{3,30}" /><span className="mt-1 block text-xs font-normal text-muted">We will generate one if you leave this blank.</span></label>
       <label className="block text-sm font-medium text-ink">Email<Input autoComplete="email" className="mt-1.5" name="email" required type="email" /></label>
-      <div className="grid gap-3 sm:grid-cols-[1fr_1.5fr]"><label className="block text-sm font-medium text-ink">Phone country<select name="phone_region" defaultValue="IN" className="mt-1.5 h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"><option value="IN">India (+91)</option><option value="US">United States (+1)</option><option value="GB">United Kingdom (+44)</option><option value="CA">Canada (+1)</option><option value="AU">Australia (+61)</option><option value="DE">Germany (+49)</option><option value="">Other (include +country code)</option></select></label><label className="block text-sm font-medium text-ink">Phone number (optional)<Input autoComplete="tel" className="mt-1.5" name="phone" placeholder="10-digit number or +country code" type="tel" /></label></div>
       <label className="block text-sm font-medium text-ink">Password<Input autoComplete="new-password" className="mt-1.5" minLength={12} name="password" required type="password" /><span className="mt-1.5 block text-xs font-normal text-muted">12+ characters, with uppercase, lowercase, number, and symbol.</span></label>
       <label className="block text-sm font-medium text-ink">Confirm password<Input autoComplete="new-password" className="mt-1.5" name="confirm_password" required type="password" /></label>
-      <label className="flex items-start gap-3 text-sm leading-5 text-muted"><input className="mt-1 size-4 accent-brand" name="terms_accepted" required type="checkbox" checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} />I agree to the terms and privacy policy.</label>
       <Button className="mt-2 w-full" disabled={submitting} type="submit">{submitting ? "Creating account…" : "Create account"}</Button>
-      <SocialButtons termsAccepted={termsAccepted} />
+      </> : <p className="rounded-lg border border-line p-3 text-center text-xs leading-6 text-muted">Email signup is currently unavailable. Use an available sign-in option above, or <Link href="/review" className="font-semibold text-brand underline">check your resume without an account</Link>.</p>}
       <p className="text-center text-sm text-muted">Already have an account? <Link className="font-medium text-brand hover:underline" href="/login">Sign in</Link></p>
     </form>
   );

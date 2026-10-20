@@ -1,7 +1,21 @@
 from __future__ import annotations
 
 from html import escape
+from io import BytesIO
+from pathlib import Path
 from typing import Any
+
+import reportlab
+from reportlab.lib.colors import HexColor
+from reportlab.lib.enums import TA_LEFT
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+
+FONT_DIRECTORY = Path(reportlab.__file__).parent / "fonts"
+pdfmetrics.registerFont(TTFont("ResumeSans", str(FONT_DIRECTORY / "Vera.ttf")))
+pdfmetrics.registerFont(TTFont("ResumeSansBold", str(FONT_DIRECTORY / "VeraBd.ttf")))
 
 
 def _display(value: Any) -> str:
@@ -15,6 +29,8 @@ def _display(value: Any) -> str:
 
 
 def resume_lines(snapshot: dict[str, Any], template_key: str) -> list[str]:
+    if snapshot.get("source") == "document_import":
+        return str(snapshot.get("imported_text", "")).splitlines()
     hidden = set(snapshot.get("resume_meta", {}).get("hidden_sections", []))
     lines = [f"Template: {template_key}"]
     profile = snapshot.get("profile", {})
@@ -93,10 +109,13 @@ def render_preview_html(snapshot: dict[str, Any], template_key: str) -> str:
     }
     font, accent, background = themes.get(template_key, themes["ats_readable"])
     section_names = {"Links", "Experience", "Projects", "Education", "Skills", "Certifications", "Courses & training", "Achievements", "Languages", "Open-source contributions"}
-    body = "\n".join(
-        f"<p class=\"{'title' if index == 1 else 'subtitle' if index == 2 else 'section' if line in section_names else 'body'}\">{escape(line)}</p>" if line else "<div class=\"spacer\"></div>"
-        for index, line in enumerate(lines)
-    )
+    if snapshot.get("source") == "document_import":
+        body = f'<pre style="white-space:pre-wrap;overflow-wrap:anywhere;font:inherit">{escape(str(snapshot.get("imported_text", "")))}</pre>'
+    else:
+        body = "\n".join(
+            f"<p class=\"{'title' if index == 1 else 'subtitle' if index == 2 else 'section' if line in section_names else 'body'}\">{escape(line)}</p>" if line else "<div class=\"spacer\"></div>"
+            for index, line in enumerate(lines)
+        )
     return f"""<!doctype html><html><head><meta charset=\"utf-8\"><title>{title}</title><style>
     @page {{ size: A4; margin: 18mm; }} body {{ font-family: {font}; color: #16213e; background: {background}; max-width: 800px; margin: 0 auto; line-height: 1.45; }}
     p {{ margin: 0 0 7px; }} .title {{ font-size: 28px; font-weight: 700; }} .subtitle {{ font-size: 17px; color: {accent}; }} .section {{ margin-top: 18px; border-bottom: 2px solid {accent}; color: {accent}; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }} .body {{ font-size: 11px; }}
@@ -104,64 +123,26 @@ def render_preview_html(snapshot: dict[str, Any], template_key: str) -> str:
     </style></head><body data-template=\"{escape(template_key)}\">{body}</body></html>"""
 
 
-def _pdf_escape(value: str) -> str:
-    return value.encode("latin-1", "replace").decode("latin-1").replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
-
-
 def render_pdf(snapshot: dict[str, Any], template_key: str) -> bytes:
-    """Create a deterministic, text-searchable A4 PDF without external services."""
-
+    """Create searchable, paginated PDFs with embedded fonts and real text wrapping."""
+    output = BytesIO()
+    document = SimpleDocTemplate(output, pagesize=(595, 842), leftMargin=50, rightMargin=50,
+                                 topMargin=48, bottomMargin=48, pageCompression=0, invariant=1,
+                                 title="Resume", author="", creator="CareerPilot")
+    accent = {"modern": "#3456c4", "student": "#13795b", "developer": "#155e75", "creative": "#8b3d77"}.get(template_key, "#243247")
+    body = ParagraphStyle("body", fontName="ResumeSans", fontSize=10, leading=15, spaceAfter=5, alignment=TA_LEFT, splitLongWords=True)
+    title = ParagraphStyle("title", parent=body, fontName="ResumeSansBold", fontSize=22, leading=29, spaceAfter=12)
+    heading = ParagraphStyle("heading", parent=body, fontName="ResumeSansBold", fontSize=11, textColor=HexColor(accent), spaceBefore=14, spaceAfter=7, keepWithNext=True)
+    section_names = {"links", "summary", "profile", "objective", "experience", "work experience", "professional experience", "projects", "education", "skills", "technical skills", "certifications", "courses & training", "achievements", "languages", "open-source contributions"}
     lines = resume_lines(snapshot, template_key)
-    layout = {
-        "modern": (11, 18, 16),
-        "professional": (10, 17, 15),
-        "minimal": (10, 16, 14),
-        "student": (11, 18, 16),
-        "developer": (10, 17, 15),
-        "creative": (11, 19, 16),
-        "ats_readable": (10, 16, 14),
-    }.get(template_key, (10, 16, 14))
-    body_size, title_size, leading = layout
-    section_names = {"Links", "Experience", "Projects", "Education", "Skills", "Certifications", "Courses & training", "Achievements", "Languages", "Open-source contributions"}
-    pages = [lines[index : index + 44] for index in range(0, len(lines), 44)] or [["Career Passport"]]
-    objects: list[bytes] = []
-    objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
-    page_refs: list[int] = []
-    for page_lines in pages:
-        commands = ["BT", f"/F1 {body_size} Tf", "54 790 Td"]
-        for index, line in enumerate(page_lines):
-            if index:
-                commands.append(f"0 -{leading} Td")
-            if index == 1:
-                commands.append(f"/F1 {title_size} Tf")
-            elif line in section_names:
-                commands.append(f"/F1 {body_size + 1} Tf")
-            else:
-                commands.append(f"/F1 {body_size} Tf")
-            commands.append(f"({_pdf_escape(line)}) Tj")
-        commands.append("ET")
-        stream = "\n".join(commands).encode("latin-1", "replace")
-        objects.append(f"<< /Length {len(stream)} >>\nstream\n".encode() + stream + b"\nendstream")
-        content_ref = len(objects)
-        objects.append(b"")
-        objects[-1] = b""
-        page_refs.append(len(objects) + 1)
-        objects.append(b"")
-        objects[-1] = f"<< /Type /Page /Parent PAGES /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R >> >> /Contents {content_ref} 0 R >>".encode()
-    pages_ref = len(objects) + 1
-    objects.append(f"<< /Type /Pages /Kids [{ ' '.join(f'{ref} 0 R' for ref in page_refs) }] /Count {len(page_refs)} >>".replace("PAGES", f"{pages_ref} 0 R").encode())
-    catalog_ref = len(objects) + 1
-    objects.append(f"<< /Type /Catalog /Pages {pages_ref} 0 R >>".encode())
-
-    output = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
-    offsets = [0]
-    for number, obj in enumerate(objects, start=1):
-        offsets.append(len(output))
-        output.extend(f"{number} 0 obj\n".encode())
-        output.extend(obj)
-        output.extend(b"\nendobj\n")
-    xref = len(output)
-    output.extend(f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode())
-    output.extend(b"".join(f"{offset:010d} 00000 n \n".encode() for offset in offsets[1:]))
-    output.extend(f"trailer\n<< /Size {len(objects) + 1} /Root {catalog_ref} 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode())
-    return bytes(output)
+    if snapshot.get("source") != "document_import":
+        lines = lines[1:]  # Internal template identifiers do not belong in an application.
+    story = []
+    for index, line in enumerate(lines):
+        style = title if index == 0 else heading if line.strip().lower() in section_names else body
+        if not line.strip():
+            story.append(Spacer(1, 5))
+            continue
+        story.append(Paragraph(escape(line), style))
+    document.build(story or [Paragraph("Resume", title)])
+    return output.getvalue()

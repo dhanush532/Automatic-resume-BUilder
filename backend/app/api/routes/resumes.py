@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -241,8 +242,20 @@ def create_version(
     db: Session = Depends(get_db_session),
 ) -> ResumeVersionResponse:
     resume = _owned_resume(db, authenticated.user.id, resume_id)
-    edit = ResumeContentEdit.model_validate(payload.model_dump(exclude={"change_summary"}))
-    snapshot = apply_content_edit(build_passport_snapshot(db, authenticated.user.id), edit)
+    if payload.name is not None:
+        if not payload.name.strip():
+            raise HTTPException(422, "Give your resume a name.")
+        resume.name = payload.name.strip()
+    if payload.template_id is not None:
+        resume.template_id = _template(db, payload.template_id).id
+    edit = ResumeContentEdit.model_validate(payload.model_dump(exclude={"change_summary", "name", "template_id"}))
+    latest = _latest_version(db, resume.id)
+    base = latest.content_snapshot if latest and latest.content_snapshot.get("source") == "document_import" else build_passport_snapshot(db, authenticated.user.id)
+    try:
+        snapshot = apply_content_edit(base, edit)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    resume.updated_at = datetime.now(UTC)
     version = ResumeVersion(
         resume_id=resume.id,
         version_number=_next_version_number(db, resume.id),

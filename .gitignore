@@ -37,3 +37,9 @@ storage/
 Thumbs.db
 .idea/
 .vscode/
+
+# Locally installed assistant skill catalogs (reinstall using skills-lock.json)
+.agents/
+.opencode/
+frontend/test-results/
+frontend/playwright-report/

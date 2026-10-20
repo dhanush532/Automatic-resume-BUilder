@@ -129,7 +129,7 @@ async def callback(provider: str, request: Request, db: Session = Depends(get_db
         record_security_event(db, SecurityEventType.LOGIN_SUCCESS, user_id=user.id, context=get_request_context(request), metadata={"provider": provider})
         db.commit()
         set_session_cookie(response, raw)
-        response.headers["location"] = settings.frontend_origin + "/passport"
+        response.headers["location"] = settings.frontend_origin + "/review"
     except Exception:
         db.rollback()
         logging.getLogger(__name__).warning("oauth_authentication_failed provider=%s", provider)

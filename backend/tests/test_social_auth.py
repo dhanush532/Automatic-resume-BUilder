@@ -50,13 +50,13 @@ def callback(client, provider, state, code="test-code"):
 def test_social_registration_and_login_keep_same_uuid(client, db_session, provider_profile, provider):
     state = authorize(client, provider)
     reply = callback(client, provider, state)
-    assert reply.status_code == 303 and reply.headers["location"].endswith("/passport")
+    assert reply.status_code == 303 and reply.headers["location"].endswith("/review")
     user = client.get("/api/v1/auth/me").json()
     assert user["email"] == provider_profile["verified_email"]
     assert db_session.get(User, user["id"]).password_hash is None
     client.post("/api/v1/auth/logout")
     state = authorize(client, provider)
-    assert callback(client, provider, state).headers["location"].endswith("/passport")
+    assert callback(client, provider, state).headers["location"].endswith("/review")
     assert client.get("/api/v1/auth/me").json()["id"] == user["id"]
     assert db_session.scalar(select(func.count()).select_from(OAuthIdentity).where(OAuthIdentity.user_id == user["id"])) == 1
 
@@ -88,7 +88,7 @@ def test_invalid_replayed_expired_state_and_browser_mismatch_fail(client, db_ses
     state = authorize(client, "google")
     with TestClient(app) as other_browser:
         assert "authentication_failed" in callback(other_browser, "google", state).headers["location"]
-    assert callback(client, "google", state).headers["location"].endswith("/passport")
+    assert callback(client, "google", state).headers["location"].endswith("/review")
     assert "authentication_failed" in callback(client, "google", state).headers["location"]
     state = authorize(client, "google")
     row = db_session.scalar(select(OAuthAttempt).where(OAuthAttempt.consumed_at.is_(None)).order_by(OAuthAttempt.expires_at.desc()))

@@ -1,0 +1,82 @@
+name: Application quality
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: careerpilot
+          POSTGRES_PASSWORD: careerpilot
+          POSTGRES_DB: careerpilot
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U careerpilot"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://careerpilot:careerpilot@localhost:5432/careerpilot
+      AUTH_SECRET: ci-only-nonproduction-test-secret-for-isolated-database
+      FRONTEND_ORIGIN: http://localhost:3000
+      BACKEND_ORIGIN: http://localhost:8000
+      SESSION_COOKIE_SECURE: "false"
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install backend dependencies
+        working-directory: backend
+        run: uv sync --frozen --all-groups
+      - name: Validate backend and schema
+        working-directory: backend
+        run: |
+          uv run ruff check .
+          uv run alembic upgrade head
+          uv run alembic check
+          uv run pytest
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Validate frontend and production dependencies
+        working-directory: frontend
+        run: |
+          npm run lint
+          npm run typecheck
+          npm test
+          npm run build
+          npm audit --omit=dev
+      - name: Browser regression tests
+        working-directory: frontend
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:e2e
+      - name: Upload browser failure details
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-failure-details
+          path: frontend/test-results/
+          retention-days: 7

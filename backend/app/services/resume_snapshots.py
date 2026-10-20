@@ -178,7 +178,11 @@ def apply_content_edit(snapshot: dict[str, Any], edit: ResumeContentEdit) -> dic
         result["profile"]["headline"] = edit.headline_override
     if edit.summary_override is not None:
         result["profile"]["bio"] = edit.summary_override
-    if edit.hidden_sections:
+    if edit.imported_text is not None:
+        if result.get("source") != "document_import":
+            raise ValueError("Text editing is only supported for imported resumes.")
+        result["imported_text"] = edit.imported_text
+    if edit.hidden_sections is not None:
         meta["hidden_sections"] = edit.hidden_sections
     if edit.section_order is not None:
         meta["section_order"] = edit.section_order

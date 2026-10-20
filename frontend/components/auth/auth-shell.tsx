@@ -15,8 +15,9 @@ export function AuthShell({
         </Link>
         <div className="my-auto max-w-sm">
           <div className="grid size-11 place-items-center rounded-lg bg-white/10 text-indigo-200"><LockKeyhole className="size-5" /></div>
-          <h2 className="mt-6 text-3xl font-semibold tracking-tight">Your career record stays yours.</h2>
-          <p className="mt-4 text-sm leading-7 text-slate-300">CareerPilot hashes passwords and keeps session tokens in HTTP-only cookies. Your email verification and connected login methods protect the same account.</p>
+          <h2 className="mt-6 text-4xl font-semibold tracking-tight">Less admin.<br />More possibility.</h2>
+          <p className="mt-5 text-sm leading-7 text-slate-300">Save your strongest drafts, keep your versions together, and be ready for your next opportunity. Start with your existing resume, not an empty form.</p>
+          <Link href="/review" className="mt-8 inline-flex border-b border-emerald-200/40 pb-2 text-sm text-emerald-200">Just want feedback? Check a resume first →</Link>
         </div>
         <p className="text-sm text-slate-400">CareerPilot · Private career workspace</p>
       </aside>

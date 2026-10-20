@@ -113,6 +113,22 @@ def test_resume_template_validation_and_customization_review(client: TestClient,
     assert unavailable.status_code == 503
 
 
+def test_import_edit_restore_and_owner_boundary(client: TestClient, resume_user: dict[str, str]):
+    text = "Resume Owner\nExperience\nBuilt Python APIs for 200 users.\nEducation\nBSc Computer Science.\nSkills\nPython, SQL, Docker."
+    imported = client.post("/api/v1/review/save", json={"text": text, "name": "Imported draft"})
+    assert imported.status_code == 201, imported.text
+    resume_id = imported.json()["id"]
+    original = client.get(f"/api/v1/resumes/{resume_id}").json()["latest_version"]
+    edit = client.post(f"/api/v1/resumes/{resume_id}/versions", json={"imported_text": text + "\nProjects\nCreated an accessible dashboard.", "name": "Revised import"})
+    assert edit.status_code == 201, edit.text
+    assert "accessible dashboard" in edit.json()["content_snapshot"]["imported_text"]
+    assert client.get(f"/api/v1/resumes/{resume_id}").json()["name"] == "Revised import"
+    restored = client.post(f"/api/v1/resumes/{resume_id}/versions/{original['id']}/restore")
+    assert restored.status_code == 201 and restored.json()["content_snapshot"]["imported_text"] == text
+    client.post("/api/v1/auth/logout")
+    assert client.get(f"/api/v1/resumes/{resume_id}").status_code == 401
+
+
 def test_resume_owner_isolation(client: TestClient, db_session: Session, resume_user: dict[str, str]):
     other_client = TestClient(__import__("app.main", fromlist=["app"]).app)
     suffix = uuid4().hex[:12]
