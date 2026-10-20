@@ -5,7 +5,8 @@ from app.main import create_application
 
 
 def test_health_reports_unconfigured_database(monkeypatch):
-    settings = Settings(_env_file=None)
+    # Disabling dotenv does not disable process environment variables (as used in CI).
+    settings = Settings(_env_file=None, database_url=None, app_env="development")
     monkeypatch.setattr("app.main.get_settings", lambda: settings)
     monkeypatch.setattr("app.api.routes.health.get_settings", lambda: settings)
     client = TestClient(create_application())
