@@ -62,6 +62,12 @@ python .opencode/skills/ui-ux-pro-max/scripts/search.py "career resume productiv
 
 Skill catalogs are local development assets, ignored in Git. GSAP source revisions are recorded in `skills-lock.json`. Restart OpenCode to discover newly installed skills automatically; their relevant guidance was read directly for this implementation.
 
+## Job-specific resumes and themes
+
+Resumes can now be drafted for a specific job from existing profile or imported-resume evidence. A target title and job description create a new `job_specific` resume that reorders sections and bullets by keyword relevance, tightens filler phrasing, and rebuilds the summary strictly from owned content. Numbers, skills, employers, and credentials are never invented; the draft records a `job_target` block with the method, matched terms, and any qualifications the posting asks for that the profile does not evidence, so gaps stay visible for review. The master resume and its versions are untouched, and further edits to a tailored draft keep the job target. With no AI provider configured, generation runs the deterministic evidence-grounded path; the existing provider boundary is still consulted first and any provider wording is rejected unless it is token-equivalent to the source evidence.
+
+Each stored template now maps to one of six genuinely distinct layouts — centered (Executive Minimal), banded (Modern Professional / Student Classic), plain (Technical ATS), editorial gutter (Elegant Editorial), two-column rail (Contemporary Sidebar), and ribbon bars (Creative Modern) — rendered identically in HTML previews and ReportLab PDFs, including paginated multi-page exports and sidebar rail continuation. The resume editor shows a live preview that updates as you edit (unsaved), theme thumbnails rendered from the actual resume content, accent/typeface/spacing/margin customization persisted per version, and an ATS-safe toggle that previews and exports through the plain layout. `/resumes/templates?role=…` marks the theme recommended for a target role.
+
 ## Validation
 
 ```text
@@ -77,7 +83,7 @@ frontend: npx playwright install chromium
 frontend: npm run test:e2e
 ```
 
-Browser tests exercise real local upload, validation, evaluation, job-description comparison, PDF download, sign-in draft restoration, mobile navigation, reduced motion, and horizontal overflow. They require local PostgreSQL with migrations applied. Tests use synthetic resume content. Backend regression tests cover document parsing, PDF round trips, HTML escaping, import editing/restoration, ownership, and existing authentication/workspace behavior.
+Browser tests exercise real local upload, validation, evaluation, job-description comparison, PDF download, sign-in draft restoration, mobile navigation, reduced motion, and horizontal overflow. They require local PostgreSQL with migrations applied. Tests use synthetic resume content. Backend regression tests cover document parsing, PDF round trips, HTML escaping, import editing/restoration, ownership, and existing authentication/workspace behavior, plus evidence-bound job-specific generation, master/tailored isolation, draft previews, design persistence, and per-theme HTML/PDF rendering and pagination.
 
 At release validation, the production npm dependency audit reports zero vulnerabilities. The full audit still reports nine transitive development-tool advisories (Tailwind/ESLint glob parsing and PostCSS selector parsing); do not interpret the production-only result as a clean full development audit. These require a separately tested toolchain upgrade/upstream fixes rather than a forced incompatible dependency downgrade. Backend tests also report the existing Starlette/httpx test-client deprecation warning. Windows browser-test startup can log a Python asyncio connection-reset warning when navigation aborts a request; the actual browser flows are asserted independently.
 

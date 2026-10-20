@@ -18,6 +18,7 @@ from app.schemas.resume import (
     ResumeCreate,
     ResumeCustomizationCreate,
     ResumeCustomizationResponse,
+    ResumeDraftPreview,
     ResumePreviewResponse,
     ResumeResponse,
     ResumeTemplateResponse,
@@ -32,6 +33,8 @@ from app.services.resume_snapshots import (
     build_passport_snapshot,
     passport_source_ids,
 )
+from app.services.resume_tailoring import tailor_snapshot
+from app.services.resume_themes import recommended_theme, theme_for
 
 router = APIRouter(prefix="/resumes")
 
@@ -79,10 +82,18 @@ def _resume_response(db: Session, resume: Resume) -> ResumeResponse:
         "status": resume.status,
         "created_at": resume.created_at,
         "updated_at": resume.updated_at,
-        "template": resume.template,
+        "template": _template_response(resume.template),
         "latest_version": _version_response(latest) if latest else None,
         "version_count": version_count,
     })
+
+
+def _template_response(template: ResumeTemplate, recommended_key: str | None = None) -> ResumeTemplateResponse:
+    theme = theme_for(template.template_key)
+    data = ResumeTemplateResponse.model_validate(template).model_dump()
+    data.update(display_name=theme["name"], description=theme["description"], layout=theme["layout"], ats_safe=theme["ats_safe"],
+                recommended=recommended_key is not None and template.template_key == recommended_key)
+    return ResumeTemplateResponse.model_validate(data)
 
 
 def _version_for_owner(db: Session, user_id: UUID, resume_id: UUID, version_id: UUID) -> ResumeVersion:
@@ -103,11 +114,35 @@ def _next_version_number(db: Session, resume_id: UUID) -> int:
 
 @router.get("/templates", response_model=list[ResumeTemplateResponse])
 def list_templates(
+    role: str | None = Query(default=None, min_length=2, max_length=120),
     _: AuthenticatedRequest = Depends(require_authenticated_request),
     db: Session = Depends(get_db_session),
 ) -> list[ResumeTemplateResponse]:
     templates = db.scalars(select(ResumeTemplate).where(ResumeTemplate.is_active.is_(True)).order_by(ResumeTemplate.name)).all()
-    return [ResumeTemplateResponse.model_validate(template) for template in templates]
+    recommended_key = recommended_theme(role.strip()) if role and role.strip() else None
+    return [_template_response(template, recommended_key) for template in templates]
+
+
+@router.post("/preview")
+def draft_preview(payload: ResumeDraftPreview, response: Response,
+                  authenticated: AuthenticatedRequest = Depends(require_authenticated_request),
+                  db: Session = Depends(get_db_session)):
+    if payload.base_resume_id:
+        _owned_resume(db, authenticated.user.id, payload.base_resume_id)
+        latest = _latest_version(db, payload.base_resume_id)
+        if not latest:
+            raise HTTPException(409, "Resume has no version to preview.")
+        snapshot = latest.content_snapshot
+    else:
+        snapshot = build_passport_snapshot(db, authenticated.user.id)
+    template = _template(db, payload.template_id)
+    try:
+        snapshot = apply_content_edit(snapshot, payload.edits)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    key = "ats_readable" if payload.ats_safe else template.template_key
+    response.headers["Cache-Control"] = "no-store"
+    return {"html": render_preview_html(snapshot, key), "template_key": key}
 
 
 @router.get("", response_model=list[ResumeResponse])
@@ -126,17 +161,36 @@ def create_resume(
     db: Session = Depends(get_db_session),
 ) -> ResumeResponse:
     template = _template(db, payload.template_id)
-    resume = Resume(user_id=authenticated.user.id, name=payload.name.strip(), template_id=template.id, type=payload.type, status="draft")
+    if not payload.name.strip():
+        raise HTTPException(422, "Give your resume a name.")
+    snapshot = build_passport_snapshot(db, authenticated.user.id)
+    if payload.base_resume_id:
+        _owned_resume(db, authenticated.user.id, payload.base_resume_id)
+        latest = _latest_version(db, payload.base_resume_id)
+        if not latest:
+            raise HTTPException(409, "Selected resume has no content.")
+        snapshot = latest.content_snapshot
+    targeted = bool(payload.target_job_title or payload.job_description)
+    if targeted:
+        if not payload.target_job_title or not payload.target_job_title.strip() or not payload.job_description or not payload.job_description.strip():
+            raise HTTPException(422, "Provide both a target job title and a job description.")
+        try:
+            snapshot = tailor_snapshot(snapshot, payload.target_job_title.strip(), payload.job_description.strip())
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+    if payload.design:
+        snapshot = apply_content_edit(snapshot, ResumeContentEdit(design=payload.design))
+    resume = Resume(user_id=authenticated.user.id, name=payload.name.strip(), template_id=template.id, type="job_specific" if targeted else payload.type, status="draft")
     db.add(resume)
     db.flush()
     version = ResumeVersion(
         resume_id=resume.id,
         version_number=1,
-        source="passport",
-        content_snapshot=build_passport_snapshot(db, authenticated.user.id),
+        source="manual" if targeted else "passport",
+        content_snapshot=snapshot,
         template_id=template.id,
         created_by=authenticated.user.id,
-        change_summary="Initial version derived from Career Passport",
+        change_summary=f"Job-specific draft for {payload.target_job_title}" if targeted else "Initial version derived from Career Passport",
     )
     db.add(version)
     db.commit()
@@ -250,7 +304,9 @@ def create_version(
         resume.template_id = _template(db, payload.template_id).id
     edit = ResumeContentEdit.model_validate(payload.model_dump(exclude={"change_summary", "name", "template_id"}))
     latest = _latest_version(db, resume.id)
-    base = latest.content_snapshot if latest and latest.content_snapshot.get("source") == "document_import" else build_passport_snapshot(db, authenticated.user.id)
+    base = latest.content_snapshot if latest and (latest.content_snapshot.get("source") in {"document_import", "job_tailored"} or "job_target" in latest.content_snapshot) else build_passport_snapshot(db, authenticated.user.id)
+    if latest and "design" in latest.content_snapshot.get("resume_meta", {}):
+        base.setdefault("resume_meta", {})["design"] = latest.content_snapshot["resume_meta"]["design"]
     try:
         snapshot = apply_content_edit(base, edit)
     except ValueError as exc:
@@ -329,6 +385,7 @@ def preview_resume(
 def export_pdf(
     resume_id: UUID,
     version_id: UUID | None = Query(default=None),
+    ats_safe: bool = Query(default=False),
     authenticated: AuthenticatedRequest = Depends(require_authenticated_request),
     db: Session = Depends(get_db_session),
 ) -> StreamingResponse:
@@ -336,7 +393,7 @@ def export_pdf(
     template = db.get(ResumeTemplate, version.template_id)
     if not template:
         raise _not_found()
-    pdf = render_pdf(version.content_snapshot, template.template_key)
+    pdf = render_pdf(version.content_snapshot, "ats_readable" if ats_safe else template.template_key)
     return StreamingResponse(iter([pdf]), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="resume-{resume_id}.pdf"'})
 
 

@@ -174,6 +174,8 @@ def passport_source_ids(snapshot: dict[str, Any]) -> set[str]:
 def apply_content_edit(snapshot: dict[str, Any], edit: ResumeContentEdit) -> dict[str, Any]:
     result = deepcopy(snapshot)
     meta = result.setdefault("resume_meta", {})
+    if edit.design is not None:
+        meta["design"] = edit.design.model_dump(mode="json")
     if edit.headline_override is not None:
         result["profile"]["headline"] = edit.headline_override
     if edit.summary_override is not None:

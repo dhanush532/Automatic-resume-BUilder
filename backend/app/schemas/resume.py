@@ -26,12 +26,27 @@ class ResumeTemplateResponse(ResumeModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    display_name: str | None = None
+    layout: str | None = None
+    ats_safe: bool = True
+    recommended: bool = False
+
+
+class ResumeDesign(BaseModel):
+    accent: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+    font: Literal["theme", "sans", "serif", "mono"] = "theme"
+    spacing: Literal["compact", "comfortable"] = "comfortable"
+    margin_mm: int = Field(default=17, ge=12, le=25)
 
 
 class ResumeCreate(BaseModel):
     name: str = Field(min_length=1, max_length=160)
     template_id: UUID
     type: ResumeType = "master"
+    target_job_title: str | None = Field(default=None, min_length=2, max_length=120)
+    job_description: str | None = Field(default=None, min_length=20, max_length=30000)
+    base_resume_id: UUID | None = None
+    design: ResumeDesign | None = None
 
 
 class ResumeUpdate(BaseModel):
@@ -41,6 +56,7 @@ class ResumeUpdate(BaseModel):
 
 
 class ResumeContentEdit(BaseModel):
+    design: ResumeDesign | None = None
     imported_text: str | None = Field(default=None, min_length=80, max_length=60000)
     headline_override: str | None = Field(default=None, max_length=160)
     summary_override: str | None = Field(default=None, max_length=5000)
@@ -172,3 +188,10 @@ class ResumePreviewResponse(BaseModel):
     version_id: UUID
     template_key: str
     html: str
+
+
+class ResumeDraftPreview(BaseModel):
+    template_id: UUID
+    base_resume_id: UUID | None = None
+    edits: ResumeContentEdit = Field(default_factory=ResumeContentEdit)
+    ats_safe: bool = False
