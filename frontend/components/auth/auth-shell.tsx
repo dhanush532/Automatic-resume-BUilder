@@ -1,37 +1,30 @@
 import Link from "next/link";
-import { LockKeyhole } from "lucide-react";
+import { ArrowUpRight, Command, LockKeyhole } from "lucide-react";
 
-export function AuthShell({
-  title,
-  description,
-  children,
-}: Readonly<{ title: string; description: string; children: React.ReactNode }>) {
-  return (
-    <main className="auth-surface grid min-h-screen bg-surface lg:grid-cols-[.9fr_1.1fr]">
-      <aside className="hidden bg-ink px-12 py-10 text-white lg:flex lg:flex-col">
-        <Link className="flex items-center gap-2 text-base font-semibold" href="/">
-          <span className="grid size-8 place-items-center rounded-lg bg-white text-sm font-bold text-ink">C</span>
-          CareerPilot
-        </Link>
-        <div className="my-auto max-w-sm">
-          <div className="grid size-11 place-items-center rounded-lg bg-white/10 text-indigo-200"><LockKeyhole className="size-5" /></div>
-          <h2 className="mt-6 text-4xl font-semibold tracking-tight">Less admin.<br />More possibility.</h2>
-          <p className="mt-5 text-sm leading-7 text-slate-300">Save your strongest drafts, keep your versions together, and be ready for your next opportunity. Start with your existing resume, not an empty form.</p>
-          <Link href="/review" className="mt-8 inline-flex border-b border-emerald-200/40 pb-2 text-sm text-emerald-200">Just want feedback? Check a resume first →</Link>
-        </div>
-        <p className="text-sm text-slate-400">CareerPilot · Private career workspace</p>
-      </aside>
-      <section className="flex items-center justify-center px-5 py-10 sm:px-8">
-        <div className="w-full max-w-md">
-          <Link className="mb-12 flex items-center gap-2 font-semibold text-ink lg:hidden" href="/">
-            <span className="grid size-8 place-items-center rounded-lg bg-brand text-sm font-bold text-white">C</span>
-            CareerPilot
-          </Link>
-          <h1 className="text-3xl font-semibold tracking-tight text-ink">{title}</h1>
-          <p className="mt-3 text-sm leading-6 text-muted">{description}</p>
-          <div className="mt-8">{children}</div>
-        </div>
-      </section>
-    </main>
-  );
+function Brand() {
+  return <Link href="/" className="wordmark" aria-label="CareerPilot home"><span className="brand-mark"><Command size={20} aria-hidden="true" /></span>careerpilot<span className="brand-dot">.</span></Link>;
+}
+
+export function AuthShell({ title, description, children }: Readonly<{ title: string; description: string; children: React.ReactNode }>) {
+  return <main className="auth-surface auth-layout">
+    <aside className="auth-story">
+      <Brand />
+      <div className="auth-story-copy">
+        <span className="auth-story-icon"><LockKeyhole size={21} aria-hidden="true" /></span>
+        <h2>Less admin.<br />More possibility.</h2>
+        <p>Save your strongest drafts, keep your versions together, and be ready for your next opportunity. Start with your existing resume, not an empty form.</p>
+        <Link href="/review">Check a resume first <ArrowUpRight size={16} aria-hidden="true" /></Link>
+      </div>
+      <p>YOUR EXPERIENCE. YOUR NEXT CHAPTER.</p>
+    </aside>
+    <section className="auth-form-region" aria-label={title}>
+      <div className="auth-form-card">
+        <div className="auth-mobile-brand"><Brand /></div>
+        <h1>{title}</h1>
+        <p className="auth-description">{description}</p>
+        <div className="auth-form-content">{children}</div>
+        <footer className="auth-form-footer"><Link href="/">Back to home</Link><Link href="/privacy">Privacy</Link><Link href="/terms">Terms</Link></footer>
+      </div>
+    </section>
+  </main>;
 }

@@ -36,6 +36,12 @@ Preview HTML is displayed in a sandboxed iframe so document CSS cannot restyle t
 
 Design direction: warm neutral surfaces, forest-green typography/actions, lime accents, Plus Jakarta Sans, clear navigation, and a real upload-first call to action. GSAP uses scoped `useGSAP`, `matchMedia` reduced-motion handling, transform/opacity animation, and cleanup on unmount. Core content is server-rendered and not hidden by base CSS.
 
+### Shared-theme and spacing correction
+
+The shared navigation no longer sits inside a `.product-site` container with `min-height: 100vh`; that wrapper reserved an entire empty viewport above workspace content. A dedicated application shell now keeps navigation and content adjacent. Shared CSS colour tokens and the existing workspace utility scales use the same forest/olive/warm-neutral palette as the homepage, including form controls and focus states. Authentication screens use that deliberate palette even when the device prefers dark mode. Their two-column presentation is scoped to `.auth-layout`, so account settings retain their normal single-column layout.
+
+Google, GitHub, and LinkedIn symbols are visible on login/signup. Providers are enabled only after configuration checks succeed; an unavailable provider is visibly labelled and cannot initiate an OAuth request. Existing authentication-required responses and access controls are unchanged. Browser regression tests cover header-to-content geometry, form colours/focus, device colour schemes, provider availability, and mobile overflow.
+
 Installed locally and consulted:
 
 ```text

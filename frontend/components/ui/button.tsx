@@ -12,7 +12,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   ref,
 ) {
   const variants = {
-    primary: "bg-brand text-white hover:bg-[#274bb0] focus-visible:outline-brand",
+    primary: "bg-brand text-white hover:bg-[#24523f] focus-visible:outline-brand",
     secondary: "border border-line bg-white text-ink hover:bg-slate-50 focus-visible:outline-brand",
     ghost: "text-muted hover:bg-slate-100 hover:text-ink focus-visible:outline-brand",
   };

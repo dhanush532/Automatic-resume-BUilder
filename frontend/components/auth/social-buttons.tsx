@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { Github, Linkedin, LoaderCircle } from "lucide-react";
 import { apiRequest } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,7 @@ function ProviderIcon({ provider }: { provider: string }) {
 }
 
 export function SocialButtons({ mode = "login", connected = [], termsAccepted = false }: { mode?: "login" | "link" | "reauth"; connected?: string[]; termsAccepted?: boolean }) {
+  const statusId = useId();
   const [providers, setProviders] = useState<Provider[]>(() => providerNames.map((name) => ({ name, configured: false })));
   const [availability, setAvailability] = useState<"checking" | "ready" | "unavailable">("checking");
   const [error, setError] = useState<string>();
@@ -42,19 +43,22 @@ export function SocialButtons({ mode = "login", connected = [], termsAccepted = 
     catch (caught) { setError(caught instanceof Error ? caught.message : "Could not start provider authentication."); setBusy(undefined); }
   }
   return <div className="space-y-3">{error && <AuthAlert>{error}</AuthAlert>}
-    <div className="space-y-3">
-      {providers.filter((provider) => provider.configured && (mode !== "reauth" || connected.includes(provider.name))).map((provider) => {
+    <div className={mode === "login" ? "social-login-grid" : "space-y-3"}>
+      {providers.filter((provider) => mode !== "reauth" || connected.includes(provider.name)).map((provider) => {
         const name = provider.name === "github" ? "GitHub" : provider.name === "linkedin" ? "LinkedIn" : "Google";
         const label = `${mode === "link" ? "Connect" : mode === "reauth" ? "Reauthenticate with" : "Continue with"} ${name}`;
-        const hint = availability === "checking" ? `Checking ${name} availability` : availability === "unavailable" ? `${name}: sign-in temporarily unavailable` : !provider.configured ? `${name}: provider setup required` : label;
-        return <div key={provider.name} title={hint}>
+        const unavailable = availability === "ready" && !provider.configured;
+        const hint = availability === "checking" ? `Checking ${name} availability` : availability === "unavailable" ? `${name}: sign-in temporarily unavailable` : unavailable ? `${name} sign-in is not available yet` : label;
+        const noteId = `${statusId}-${provider.name}`;
+        return <div key={provider.name} title={hint} className="social-provider">
           <Button type="button" variant="secondary" aria-label={busy === provider.name ? `Redirecting to ${name}` : label}
-            className="h-12 w-full"
+            aria-describedby={unavailable ? noteId : undefined}
+            className={mode === "login" ? "h-20 w-full flex-col gap-2 px-2 text-xs disabled:opacity-100 disabled:bg-surface disabled:text-muted" : "h-12 w-full disabled:opacity-100 disabled:bg-surface disabled:text-muted"}
             disabled={availability !== "ready" || !provider.configured || !!busy || (mode === "link" && connected.includes(provider.name))} onClick={() => void start(provider.name)}>
             {busy === provider.name ? <LoaderCircle className="h-5 w-5 animate-spin" aria-hidden="true" /> : <ProviderIcon provider={provider.name} />}
-            {busy === provider.name ? "Redirecting…" : label}
+            {busy === provider.name ? "Redirecting…" : mode === "login" ? name : label}
           </Button>
-          {mode !== "login" && availability === "ready" && !provider.configured && <p className="mt-1 text-xs text-muted">Provider setup required.</p>}
+          {unavailable && <p id={noteId} className="social-provider-note">Not available yet</p>}
         </div>;
       })}
     </div>
