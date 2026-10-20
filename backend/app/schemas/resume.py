@@ -47,6 +47,16 @@ class ResumeContentEdit(BaseModel):
     hidden_sections: list[str] | None = Field(default=None, max_length=20)
     section_order: list[str] | None = Field(default=None, max_length=20)
 
+    @field_validator("imported_text")
+    @classmethod
+    def valid_imported_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.replace("\x00", "").strip()
+        if len(value) < 80:
+            raise ValueError("Add at least 80 characters of readable resume text.")
+        return value
+
     @field_validator("hidden_sections", "section_order")
     @classmethod
     def valid_section_names(cls, values: list[str] | None) -> list[str] | None:

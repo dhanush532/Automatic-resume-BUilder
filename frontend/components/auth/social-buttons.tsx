@@ -19,7 +19,7 @@ function ProviderIcon({ provider }: { provider: string }) {
   </svg>;
 }
 
-export function SocialButtons({ mode = "login", connected = [], termsAccepted = false }: { mode?: "login" | "link" | "reauth"; connected?: string[]; termsAccepted?: boolean }) {
+export function SocialButtons({ mode = "login", connected = [], termsAccepted = false, requireTerms = false }: { mode?: "login" | "link" | "reauth"; connected?: string[]; termsAccepted?: boolean; requireTerms?: boolean }) {
   const statusId = useId();
   const [providers, setProviders] = useState<Provider[]>(() => providerNames.map((name) => ({ name, configured: false })));
   const [availability, setAvailability] = useState<"checking" | "ready" | "unavailable">("checking");
@@ -38,6 +38,7 @@ export function SocialButtons({ mode = "login", connected = [], termsAccepted = 
   }, []);
   useEffect(() => { void checkAvailability(); }, [checkAvailability]);
   async function start(provider: string) {
+    if (requireTerms && !termsAccepted) { setError("Accept the terms and privacy policy before continuing with a provider."); return; }
     setBusy(provider); setError(undefined);
     try { const result = await apiRequest<{authorization_url: string}>(`/auth/oauth/${provider}/start`, {method: "POST", body: JSON.stringify({mode, terms_accepted: termsAccepted})}); window.location.assign(result.authorization_url); }
     catch (caught) { setError(caught instanceof Error ? caught.message : "Could not start provider authentication."); setBusy(undefined); }

@@ -16,7 +16,10 @@ export function SignupForm() {
   const [submitting, setSubmitting] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [emailAvailable, setEmailAvailable] = useState<boolean | null>(null);
-  useEffect(() => { void apiRequest<{email_delivery_configured: boolean}>("/auth/capabilities", { signal: AbortSignal.timeout(8000) }).then(value => setEmailAvailable(value.email_delivery_configured)).catch(() => setEmailAvailable(false)); }, []);
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("oauth_error") === "terms_required") setError("To create your account, accept the terms and privacy policy, then continue with your provider.");
+    void apiRequest<{email_delivery_configured: boolean}>("/auth/capabilities", { signal: AbortSignal.timeout(8000) }).then(value => setEmailAvailable(value.email_delivery_configured)).catch(() => setEmailAvailable(false));
+  }, []);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -48,7 +51,7 @@ export function SignupForm() {
     <form className="space-y-4" onSubmit={onSubmit}>
       {error && <AuthAlert>{error}</AuthAlert>}
       <label className="flex items-start gap-3 text-sm leading-5 text-muted"><input className="mt-1 size-4 accent-brand" name="terms_accepted" required type="checkbox" checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} /><span>I agree to the <Link href="/terms" className="underline">terms</Link> and <Link href="/privacy" className="underline">privacy policy</Link>.</span></label>
-      <SocialButtons termsAccepted={termsAccepted} />
+      <SocialButtons termsAccepted={termsAccepted} requireTerms />
       {!termsAccepted && <p className="text-center text-xs text-muted">Accept the terms above to create an account with your connected login.</p>}
       {emailAvailable === null ? <p className="text-center text-xs text-muted" role="status">Checking email signup availability…</p> : emailAvailable ? <>
       <p className="pt-3 text-center text-xs text-muted">Or create an account with email</p>

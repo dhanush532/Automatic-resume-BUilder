@@ -27,6 +27,14 @@ from app.services.sessions import session_service
 
 router = APIRouter(prefix="/auth/oauth")
 COOKIE = "careerpilot_oauth_browser"
+logger = logging.getLogger(__name__)
+
+
+def fail(response, *, provider, reason):
+    # Only internal reason codes are logged: no provider bodies, codes, tokens or emails.
+    logger.warning("oauth_authentication_failed provider=%s reason=%s", provider, reason)
+    response.headers["location"] = get_settings().frontend_origin + "/login?oauth_error=authentication_failed&reason=" + reason
+    return response
 
 
 def callback_uri(provider):
@@ -59,25 +67,28 @@ async def callback(provider: str, request: Request, db: Session = Depends(get_db
     settings = get_settings()
     failure_url = settings.frontend_origin + "/login?oauth_error=authentication_failed"
     response = RedirectResponse(failure_url, status_code=303)
-    response.delete_cookie(COOKIE, httponly=True, secure=settings.session_cookie_secure)
     if not adapter.is_configured:
-        return response
+        return fail(response, provider=provider, reason="provider_configuration")
     state, browser, code = request.query_params.get("state", ""), request.cookies.get(COOKIE, ""), request.query_params.get("code", "")
-    if not state or not browser or len(state) > 256 or not code or len(code) > 4096 or request.query_params.get("error"):
-        return response
+    if request.query_params.get("error"):
+        return fail(response, provider=provider, reason="access_denied" if request.query_params["error"] == "access_denied" else "provider_unavailable")
+    if not state or not browser or len(state) > 256 or not code or len(code) > 4096:
+        return fail(response, provider=provider, reason="session_expired")
     attempt = db.scalar(select(OAuthAttempt).where(OAuthAttempt.provider == provider, OAuthAttempt.state_hash == hash_token("oauth-state:" + state))
                         .with_for_update())
     if (not attempt or attempt.consumed_at or attempt.expires_at <= datetime.now(UTC)
             or not hmac.compare_digest(attempt.browser_hash, hash_token("oauth-browser:" + browser))):
         db.rollback()
-        return response
+        return fail(response, provider=provider, reason="session_expired")
+    response.delete_cookie(COOKIE, httponly=True, secure=settings.session_cookie_secure)
     attempt.consumed_at = datetime.now(UTC)
     try:
         verifier, nonce = decrypt(attempt.encrypted_verifier), attempt.nonce
     except Exception:
         attempt.consumed_at = datetime.now(UTC)
+        attempt.encrypted_verifier = "consumed"
         db.commit()
-        return response
+        return fail(response, provider=provider, reason="session_expired")
     attempt.encrypted_verifier = "consumed"
     target_id, session_id, mode, terms = attempt.user_id, attempt.session_id, attempt.mode, attempt.terms_accepted
     db.commit()  # one-use state before network calls; no row locks held at the provider
@@ -110,8 +121,12 @@ async def callback(provider: str, request: Request, db: Session = Depends(get_db
         if identity:
             user = db.scalar(select(User).where(User.id == identity.user_id).with_for_update())
         else:
-            if not profile.verified_email or not profile.email_verified or not terms:
-                raise OAuthError("Registration requires a verified provider email and terms acceptance.")
+            if not terms:
+                response.headers["location"] = settings.frontend_origin + "/signup?oauth_error=terms_required"
+                db.rollback()
+                return response
+            if not profile.verified_email or not profile.email_verified:
+                raise OAuthError("Registration requires a verified provider email.", code="verified_email_required")
             email = str(TypeAdapter(EmailStr).validate_python(profile.verified_email)).strip().lower()
             if db.scalar(select(User.id).where(User.email == email)):
                 response.headers["location"] = settings.frontend_origin + "/login?oauth_error=link_existing_account"
@@ -124,13 +139,17 @@ async def callback(provider: str, request: Request, db: Session = Depends(get_db
             db.add(OAuthIdentity(user_id=user.id, provider=provider, provider_user_id=profile.provider_user_id,
                 provider_email=email, created_at=datetime.now(UTC), linked_at=datetime.now(UTC)))
         if not user or not user.is_active or not user.email_verified_at or user.deleted_at:
-            raise OAuthError("Account is not active.")
+            raise OAuthError("Account is not active.", code="account_unavailable")
         _, raw = session_service.create(db, user=user, context=get_request_context(request))
         record_security_event(db, SecurityEventType.LOGIN_SUCCESS, user_id=user.id, context=get_request_context(request), metadata={"provider": provider})
         db.commit()
         set_session_cookie(response, raw)
         response.headers["location"] = settings.frontend_origin + "/review"
-    except Exception:
+    except OAuthError as exc:
         db.rollback()
-        logging.getLogger(__name__).warning("oauth_authentication_failed provider=%s", provider)
+        return fail(response, provider=provider, reason=exc.code if exc.code in {"provider_configuration", "provider_unavailable", "verified_email_required", "account_unavailable"} else "provider_unavailable")
+    except Exception as exc:
+        db.rollback()
+        logger.error("oauth_internal_error provider=%s exception_type=%s", provider, type(exc).__name__)
+        return fail(response, provider=provider, reason="internal_error")
     return response

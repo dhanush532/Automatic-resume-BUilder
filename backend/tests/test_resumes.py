@@ -119,9 +119,12 @@ def test_import_edit_restore_and_owner_boundary(client: TestClient, resume_user:
     assert imported.status_code == 201, imported.text
     resume_id = imported.json()["id"]
     original = client.get(f"/api/v1/resumes/{resume_id}").json()["latest_version"]
-    edit = client.post(f"/api/v1/resumes/{resume_id}/versions", json={"imported_text": text + "\nProjects\nCreated an accessible dashboard.", "name": "Revised import"})
+    invalid = client.post(f"/api/v1/resumes/{resume_id}/versions", json={"imported_text": " " * 90})
+    assert invalid.status_code == 422
+    edit = client.post(f"/api/v1/resumes/{resume_id}/versions", json={"imported_text": text + "\nProjects\nCreated an accessible dashboard.\x00", "name": "Revised import"})
     assert edit.status_code == 201, edit.text
     assert "accessible dashboard" in edit.json()["content_snapshot"]["imported_text"]
+    assert "\x00" not in edit.json()["content_snapshot"]["imported_text"]
     assert client.get(f"/api/v1/resumes/{resume_id}").json()["name"] == "Revised import"
     restored = client.post(f"/api/v1/resumes/{resume_id}/versions/{original['id']}/restore")
     assert restored.status_code == 201 and restored.json()["content_snapshot"]["imported_text"] == text

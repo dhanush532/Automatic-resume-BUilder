@@ -42,6 +42,16 @@ The shared navigation no longer sits inside a `.product-site` container with `mi
 
 Google, GitHub, and LinkedIn symbols are visible on login/signup. Providers are enabled only after configuration checks succeed; an unavailable provider is visibly labelled and cannot initiate an OAuth request. Existing authentication-required responses and access controls are unchanged. Browser regression tests cover header-to-content geometry, form colours/focus, device colour schemes, provider availability, and mobile overflow.
 
+### Authentication and account regression fixes
+
+Provider continuation on the login page now includes a visible terms/privacy disclosure and records agreement when that action starts a new account. Signup retains its explicit checkbox and checks it before redirecting to a provider. If an older or direct OAuth attempt has no agreement, the API returns the visitor to signup with an explanation instead of displaying a generic login failure. Existing linked accounts can still authenticate without creating a new registration consent record.
+
+Invalid callbacks no longer clear another pending attempt's browser cookie. Cancellation, expired browser state, missing verified email, and provider configuration failures have safe recovery messages. Server logs contain internal reason codes/exception types, never provider response bodies, authorization codes, access tokens, or email addresses. Unsupported providers return 404. Verified-email checks and explicit account-linking requirements remain in effect.
+
+Account settings now explicitly submit profile, reauthentication, email-change, password-change, and deletion forms when their action buttons are clicked; the shared Button intentionally defaults to a non-submit button. Imported resume edits reject whitespace-only content and strip null characters before database persistence.
+
+Regression coverage includes browser-observed OAuth request consent, signup gating, safe failure feedback, and account form submission, plus server-side consent/cookie/ownership tests and GitHub token/profile/private-email exchange through an HTTP mock transport. A real user's external GitHub authorization still requires that user's provider interaction; mocked provider checks do not claim to authenticate a personal GitHub account.
+
 Installed locally and consulted:
 
 ```text

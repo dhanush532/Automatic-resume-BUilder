@@ -132,6 +132,51 @@ def test_unauthorized_linking_is_rejected(client, provider_profile):
     assert client.post("/api/v1/auth/oauth/google/start", json={"mode": "link"}).status_code == 401
 
 
+def test_new_social_account_without_consent_returns_to_signup(client, db_session, provider_profile):
+    state = authorize(client, "github", terms=False)
+    response = callback(client, "github", state)
+    assert response.headers["location"].endswith("/signup?oauth_error=terms_required")
+    assert db_session.scalar(select(User).where(User.email == provider_profile["verified_email"])) is None
+    assert client.get("/api/v1/auth/me").status_code == 401
+    state = authorize(client, "github", terms=True)
+    assert callback(client, "github", state).headers["location"].endswith("/review")
+
+
+def test_existing_social_account_can_sign_in_without_new_registration_consent(client, provider_profile):
+    state = authorize(client, "github")
+    callback(client, "github", state)
+    owner = client.get("/api/v1/auth/me").json()["id"]
+    client.post("/api/v1/auth/logout")
+    state = authorize(client, "github", terms=False)
+    assert callback(client, "github", state).headers["location"].endswith("/review")
+    assert client.get("/api/v1/auth/me").json()["id"] == owner
+
+
+def test_invalid_callback_does_not_destroy_another_pending_attempt(client, provider_profile):
+    state = authorize(client, "github")
+    assert "session_expired" in callback(client, "github", "unrelated-invalid-state").headers["location"]
+    assert callback(client, "github", state).headers["location"].endswith("/review")
+
+
+def test_cancelled_sign_in_and_provider_errors_have_safe_reasons(client, provider_profile, monkeypatch, caplog):
+    cancelled = client.get("/api/v1/auth/oauth/github/callback?error=access_denied", follow_redirects=False)
+    assert "reason=access_denied" in cancelled.headers["location"]
+
+    async def failed_exchange(self, **kwargs):
+        raise OAuthError("DO-NOT-LOG-provider-access-token", code="provider_configuration")
+
+    monkeypatch.setattr(MockOAuth, "exchange_code", failed_exchange)
+    state = authorize(client, "github")
+    failed = callback(client, "github", state)
+    assert "reason=provider_configuration" in failed.headers["location"]
+    assert "DO-NOT-LOG" not in caplog.text and "reason=provider_configuration" in caplog.text
+
+
+def test_unsupported_oauth_provider_is_not_a_server_error(client):
+    assert client.post("/api/v1/auth/oauth/unknown/start", json={"mode": "login"}).status_code == 404
+    assert client.get("/api/v1/auth/oauth/unknown/callback").status_code == 404
+
+
 @pytest.fixture
 def signed_identity():
     private = rsa.generate_private_key(public_exponent=65537, key_size=2048)

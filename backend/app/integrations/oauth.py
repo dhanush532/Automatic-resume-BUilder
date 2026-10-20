@@ -7,6 +7,7 @@ from urllib.parse import urlencode
 
 import httpx
 import jwt
+from fastapi import HTTPException
 
 from app.auth.normalization import normalize_email
 from app.core.config import get_settings
@@ -24,7 +25,9 @@ PROVIDERS = {
 
 
 class OAuthError(ValueError):
-    pass
+    def __init__(self, message: str, *, code: str = "provider_unavailable"):
+        super().__init__(message)
+        self.code = code
 
 
 @dataclass(frozen=True)
@@ -89,11 +92,11 @@ class OAuthProvider:
             async with httpx.AsyncClient(timeout=8, follow_redirects=False, trust_env=False) as client:
                 response = await client.post(self.configuration["token"], data=values, headers={"Accept": "application/json"})
                 if not response.is_success or len(response.content) > 500_000:
-                    raise OAuthError("Provider exchange failed.")
+                    raise OAuthError("Provider exchange failed.", code="provider_configuration" if response.status_code in {400, 401, 403} else "provider_unavailable")
                 token = response.json()
                 access = token.get("access_token")
                 if not isinstance(access, str) or not access or token.get("error"):
-                    raise OAuthError("Provider exchange failed.")
+                    raise OAuthError("Provider exchange failed.", code="provider_configuration" if token.get("error") in {"incorrect_client_credentials", "redirect_uri_mismatch", "invalid_client"} else "provider_unavailable")
                 if self.name == "github":
                     headers = {"Authorization": "Bearer " + access, "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
                     profile_reply = await client.get("https://api.github.com/user", headers=headers)
@@ -129,6 +132,8 @@ class OAuthProvider:
 
 
 def get_oauth_provider(provider: str):
+    if provider not in PROVIDERS:
+        raise HTTPException(404, "Unsupported authentication provider.")
     return OAuthProvider(provider)
 
 

@@ -13,7 +13,19 @@ export function LoginForm() {
   const [error, setError] = useState<string>();
   const [user, setUser] = useState<PublicUser>();
   const [submitting, setSubmitting] = useState(false);
-  useEffect(() => { const errorCode = new URLSearchParams(window.location.search).get("oauth_error"); if (errorCode) setError(errorCode === "link_existing_account" ? "Sign in to your existing account, then connect this provider in Account settings." : "Social authentication could not be completed. Try again or use your existing login method."); }, []);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const errorCode = params.get("oauth_error");
+    const reasons: Record<string, string> = {
+      session_expired: "Your sign-in attempt expired or this browser lost its sign-in cookie. Start again in the same browser tab.",
+      access_denied: "Provider sign-in was cancelled. You can try again when you’re ready.",
+      verified_email_required: "Your provider did not share a verified email address. Verify an email in your provider account, then try again.",
+      provider_configuration: "This sign-in provider could not complete the connection. Please use another sign-in method while its configuration is checked.",
+      provider_unavailable: "The sign-in provider is temporarily unavailable. Please wait a moment and try again.",
+      account_unavailable: "This account cannot sign in right now. Use your existing login method or contact the site operator.",
+    };
+    if (errorCode) setError(errorCode === "link_existing_account" ? "Sign in to your existing account, then connect this provider in Account settings." : reasons[params.get("reason") ?? ""] ?? "Social authentication could not be completed. Try again or use your existing login method.");
+  }, []);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -52,7 +64,8 @@ export function LoginForm() {
       <label className="block text-sm font-medium text-ink">Password<Input autoComplete="current-password" className="mt-1.5" name="password" required type="password" /></label>
       <div className="flex justify-end"><Link className="text-sm font-medium text-brand hover:underline" href="/forgot-password">Forgot password?</Link></div>
       <Button className="w-full" disabled={submitting} type="submit">{submitting ? "Signing in…" : "Sign in"}</Button>
-      <SocialButtons />
+      <p className="text-center text-xs leading-6 text-muted">By continuing with a provider, you agree to our <Link href="/terms" className="underline">terms</Link> and <Link href="/privacy" className="underline">privacy policy</Link>. We’ll create an account if you’re new.</p>
+      <SocialButtons termsAccepted />
       <p className="text-center text-sm text-muted">New to CareerPilot? <Link className="font-medium text-brand hover:underline" href="/signup">Create an account</Link></p>
     </form>
   );
