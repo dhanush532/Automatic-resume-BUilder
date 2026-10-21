@@ -11,7 +11,7 @@ import { apiBaseUrl, ApiError, apiRequest } from "@/lib/api";
 import { ResumeShell, type Resume, type ResumeTemplate, type ResumeVersion } from "@/components/resumes/resume-list-page";
 
 type Design = { accent?: string | null; font: "theme" | "sans" | "serif" | "mono"; spacing: "compact" | "comfortable"; margin_mm: number };
-type JobTargetAnalysis = { skills?: string[]; matched_keywords?: string[]; missing_qualifications?: string[]; qualification_note?: string };
+type JobTargetAnalysis = { skills?: string[]; matched_keywords?: string[]; missing_qualifications?: string[]; qualification_note?: string; required_qualifications?: string[]; preferred_qualifications?: string[] };
 type JobTarget = { title: string; description: string; method: string; note: string; recommended_template_key?: string; analysis?: JobTargetAnalysis };
 type Snapshot = { source?: string; imported_text?: string; profile?: { headline?: string | null; bio?: string | null }; resume_meta?: { hidden_sections?: string[]; design?: Design }; job_target?: JobTarget };
 
@@ -32,7 +32,7 @@ function usePdfUrl(base64: string) {
 
 function PdfThumbnail({ pdf, name }: { pdf: string; name: string }) {
   const url = usePdfUrl(pdf);
-  return url ? <iframe title={`${name} document thumbnail`} aria-hidden tabIndex={-1} src={`${url}#toolbar=0&navpanes=0&view=FitH`} className="pointer-events-none absolute left-0 top-0 h-[1000px] w-[700px] origin-top-left scale-[0.27]" /> : null;
+  return url ? <iframe loading="lazy" title={`${name} document thumbnail`} aria-hidden tabIndex={-1} src={`${url}#toolbar=0&navpanes=0&view=FitH`} className="pointer-events-none absolute left-0 top-0 h-[1000px] w-[700px] origin-top-left scale-[0.27]" /> : null;
 }
 
 export function ResumeEditorPage({ resumeId }: { resumeId: string }) {
@@ -50,6 +50,7 @@ export function ResumeEditorPage({ resumeId }: { resumeId: string }) {
   const [previewPdf, setPreviewPdf] = useState("");
   const [previewKey, setPreviewKey] = useState("");
   const [previewError, setPreviewError] = useState("");
+  const [previewAttempt, setPreviewAttempt] = useState(0);
   const previewUrl = usePdfUrl(previewPdf);
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
   const [jobTitle, setJobTitle] = useState("");
@@ -83,6 +84,7 @@ export function ResumeEditorPage({ resumeId }: { resumeId: string }) {
 
   useEffect(() => {
     if (!resume || !templateId) return;
+    if (imported && text.trim().length < 80) { setPreviewError("Add at least 80 characters of resume text to render this draft."); return; }
     const controller = new AbortController();
     const timer = setTimeout(() => {
       setPreviewError("");
@@ -91,18 +93,18 @@ export function ResumeEditorPage({ resumeId }: { resumeId: string }) {
         .catch(caught => { if (!controller.signal.aborted) setPreviewError(caught instanceof Error ? caught.message : "Could not render the document. Try again."); });
     }, 400);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [resume, resumeId, templateId, edits, atsSafe, draftKey]);
+  }, [resume, resumeId, templateId, edits, atsSafe, draftKey, previewAttempt, imported, text]);
 
   useEffect(() => {
     if (!resume || !templates.length) return;
     const controller = new AbortController();
     const timer = setTimeout(() => {
       void Promise.all(templates.map(template => apiRequest<{ pdf_base64: string }>("/resumes/preview", { method: "POST", body: JSON.stringify({ template_id: template.id, base_resume_id: resumeId, edits, include_pdf: true }), signal: controller.signal })
-        .then(result => [template.id, result.pdf_base64] as const).catch(() => null)))
-        .then(pairs => { if (!controller.signal.aborted) setThumbs(Object.fromEntries(pairs.filter((pair): pair is readonly [string, string] => pair !== null))); });
+        .then(result => [template.id, result.pdf_base64] as const).catch(() => [template.id, ""] as const)))
+        .then(pairs => { if (!controller.signal.aborted) setThumbs(Object.fromEntries(pairs)); });
     }, 1200);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [resume, templates, resumeId, edits]);
+  }, [resume, templates, resumeId, edits, previewAttempt]);
 
   async function save() {
     setSaving(true); setError(""); setNotice("");
@@ -160,7 +162,7 @@ export function ResumeEditorPage({ resumeId }: { resumeId: string }) {
                     {template.ats_safe && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-800">ATS</span>}
                   </span>
                   <span className="relative mt-2 block h-[150px] w-full overflow-hidden rounded-lg border bg-white">
-                    {thumbs[template.id] ? <PdfThumbnail pdf={thumbs[template.id]} name={template.display_name ?? template.name} /> : <span className="flex h-full items-center justify-center text-[11px] text-muted" role="status">Rendering…</span>}
+                    {thumbs[template.id] ? <PdfThumbnail pdf={thumbs[template.id]} name={template.display_name ?? template.name} /> : <span className="flex h-full items-center justify-center text-[11px] text-muted" role="status">{thumbs[template.id] === "" ? "Preview unavailable — retry below" : "Rendering…"}</span>}
                   </span>
                   <span className="mt-2 block text-[11px] leading-5 text-muted">{template.description}</span>
                 </label>
@@ -206,6 +208,7 @@ export function ResumeEditorPage({ resumeId }: { resumeId: string }) {
           <p className="text-xs font-semibold uppercase tracking-wider text-brand">Job-targeted draft</p>
           <h2 className="mt-3 text-xl font-semibold tracking-tight">{jobTarget.title}</h2>
           <p className="mt-2 text-sm leading-6 text-muted">{jobTarget.note}</p>
+          {(jobTarget.analysis?.required_qualifications?.length || jobTarget.analysis?.preferred_qualifications?.length) ? <div className="mt-4 grid gap-4 sm:grid-cols-2">{(["required_qualifications", "preferred_qualifications"] as const).map(key => <div key={key}><h3 className="text-xs font-semibold">{key === "required_qualifications" ? "Required in the posting" : "Preferred in the posting"}</h3><ul className="mt-2 list-disc space-y-1 pl-4 text-xs leading-5 text-muted">{jobTarget.analysis?.[key]?.slice(0, 6).map(item => <li key={item}>{item}</li>)}</ul></div>)}</div> : null}
           {jobTarget.analysis?.missing_qualifications?.length ? <div className="mt-4"><h3 className="text-sm font-semibold">Needs your review — not evidenced in your profile</h3><ul className="mt-2 space-y-1 text-sm leading-6 text-muted">{jobTarget.analysis.missing_qualifications.map(item => <li key={item}>{item}</li>)}</ul>{jobTarget.analysis.qualification_note && <p className="mt-2 text-xs leading-5 text-muted">{jobTarget.analysis.qualification_note}</p>}</div> : null}
           {jobTarget.analysis?.matched_keywords?.length ? <p className="mt-4 text-xs leading-5 text-muted">Matched terms: {jobTarget.analysis.matched_keywords.slice(0, 12).join(", ")}</p> : null}
         </Card>}
@@ -227,6 +230,7 @@ export function ResumeEditorPage({ resumeId }: { resumeId: string }) {
           <Button asChild variant="secondary"><a role="link" tabIndex={currentPdfUrl ? 0 : -1} href={currentPdfUrl || undefined} aria-disabled={!currentPdfUrl} onClick={event => { if (!currentPdfUrl) event.preventDefault(); }} download="resume.pdf"><Download size={16} />PDF</a></Button>
         </div>
         {previewError && <Notice>{previewError}</Notice>}
+        <Button variant="ghost" className="mt-3" onClick={() => setPreviewAttempt(attempt => attempt + 1)}>Retry document previews</Button>
         {previewUrl && !currentPdfUrl && !previewError && <p className="mt-3 text-xs text-muted" role="status">Updating the document… Download is available when the current draft is ready.</p>}
         {previewUrl ? <><iframe title="Live resume preview" src={`${previewUrl}#toolbar=0&navpanes=0&view=FitH`} className="mt-4 h-[860px] w-full rounded-xl border bg-white" /><a href={previewUrl} target="_blank" rel="noreferrer" className="mt-3 inline-block text-xs text-brand underline">Open the actual PDF in a new tab</a></> : <div className="mt-4 flex h-[320px] items-center justify-center rounded-xl border bg-white text-sm text-muted" role="status">Rendering preview…</div>}
       </Card>

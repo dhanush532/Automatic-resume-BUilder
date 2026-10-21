@@ -67,4 +67,8 @@ test("preview failures are visible and cannot download an out-of-date draft", as
   await expect(page.getByRole("alert").filter({ hasText: "Document rendering failed for this draft." })).toBeVisible();
   await expect(download).toHaveAttribute("aria-disabled", "true");
   await expect(download).not.toHaveAttribute("href");
+  fail = false;
+  await page.getByRole("button", { name: "Retry document previews", exact: true }).click();
+  await expect(download).toHaveAttribute("href", /^blob:/);
+  await expect(page.getByRole("alert").filter({ hasText: "Document rendering failed for this draft." })).toHaveCount(0);
 });

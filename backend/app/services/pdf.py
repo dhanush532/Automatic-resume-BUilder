@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import reportlab
-from reportlab.lib.colors import HexColor, white
+from reportlab.lib.colors import HexColor
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
@@ -27,6 +27,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from app.services.resume_document import imported_content
 from app.services.resume_themes import theme_for
 
 FONT_DIRECTORY = Path(reportlab.__file__).parent / "fonts"
@@ -162,7 +163,7 @@ def _section_entries(key: str, records: list[dict[str, Any]]) -> list[dict[str, 
 def resume_content(snapshot: dict[str, Any]) -> dict[str, Any]:
     """Structured, layout-agnostic resume content shared by previews and PDFs."""
     if snapshot.get("source") == "document_import":
-        return {"imported": True, "text": str(snapshot.get("imported_text") or ""), "header": {"name": "", "headline": "", "contact": []}, "sections": []}
+        return imported_content(str(snapshot.get("imported_text") or ""))
     profile = snapshot.get("profile") or {}
     meta = snapshot.get("resume_meta") or {}
     hidden = set(meta.get("hidden_sections") or [])
@@ -177,7 +178,8 @@ def resume_content(snapshot: dict[str, Any]) -> dict[str, Any]:
     bio = _split_lines(profile.get("bio")) if visible else []
     if bio:
         sections.append({"key": "summary", "label": "Summary", "entries": [{"lead": None, "lines": bio}]})
-    order = list(dict.fromkeys(meta.get("section_order") or list(SECTION_LABELS)))
+    # Ordering is presentation of existing sections, not a second hide mechanism.
+    order = list(dict.fromkeys([*(meta.get("section_order") or []), *SECTION_LABELS]))
     for key in order:
         if key in hidden or key not in SECTION_LABELS:
             continue
@@ -200,6 +202,12 @@ def _mix(color: str, amount: float) -> str:
     return f"#{channel(red):02x}{channel(green):02x}{channel(blue):02x}"
 
 
+def _luminance(color: str) -> float:
+    channels = [int(color[index:index + 2], 16) / 255 for index in (1, 3, 5)]
+    linear = [value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4 for value in channels]
+    return sum(weight * value for weight, value in zip((0.2126, 0.7152, 0.0722), linear, strict=True))
+
+
 def design_tokens(snapshot: dict[str, Any], template_key: str) -> dict[str, Any]:
     theme = theme_for(template_key)
     design = ((snapshot.get("resume_meta") or {}).get("design")) or {}
@@ -219,7 +227,10 @@ def design_tokens(snapshot: dict[str, Any], template_key: str) -> dict[str, Any]
     margin = max(12, min(25, margin))
     layout = theme["layout"]
     ink = {"plain": "#111827", "editorial": "#2b2531"}.get(layout, "#16213e")
-    return {"key": template_key, "layout": layout, "name": theme["name"], "accent": accent, "tint": _mix(accent, 0.88),
+    luminance = _luminance(accent)
+    on_accent = "#ffffff" if 1.05 / (luminance + 0.05) >= 4.5 else "#111827"
+    text_accent = accent if 1.05 / (luminance + 0.05) >= 4.5 else ink
+    return {"key": template_key, "layout": layout, "name": theme["name"], "accent": accent, "on_accent": on_accent, "text_accent": text_accent, "tint": _mix(accent, 0.88),
             "hair": _mix(accent, 0.72), "ink": ink, "muted": MUTED, "family": family, "spacing": spacing,
             "compact": spacing == "compact", "margin_mm": margin, "ats_safe": theme["ats_safe"]}
 
@@ -229,7 +240,7 @@ def design_tokens(snapshot: dict[str, Any], template_key: str) -> dict[str, Any]
 def _mast_html(header: dict[str, Any], variant: str) -> str:
     name, headline = header.get("name") or "", header.get("headline") or ""
     contact = " · ".join(header["contact"])
-    if not name and not headline:
+    if not name and not headline and not contact:
         return ""
     name_html = f"<h1>{escape(name)}</h1>" if name else ""
     headline_html = f'<p class="headline">{escape(headline)}</p>' if headline else ""
@@ -289,7 +300,7 @@ h1,h2,p{margin:0;font-weight:inherit}h1,.lead,h2,.line.bullet:before{font-weight
 .metadata{font-size:9.5px;line-height:1.45;color:__MUTED__;margin-top:3px;overflow-wrap:anywhere}
 .line{margin-top:3px;font-size:10.3px;overflow-wrap:anywhere}
 .line.bullet{padding-left:13px;position:relative}
-.line.bullet:before{content:"\2022";position:absolute;left:0;top:0;color:__ACCENT__}
+.line.bullet:before{content:"\\2022";position:absolute;left:0;top:0;color:__TEXT_ACCENT__}
 pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-size:10.3px}
 __EXTRA__
 """
@@ -299,15 +310,17 @@ def _html_css(tokens: dict[str, Any]) -> str:
     layout = tokens["layout"]
     extra = {
         "centered": ".mast{text-align:center;border-bottom:1px solid __INK__;padding-bottom:14px}.mast h1{font-size:30px}.rsec h2{text-align:center}",
-        "banded": ".namebar{background:__ACCENT__;color:#fff;padding:10px 14px}.mast .namebar h1{font-size:24px}.infobar{background:__TINT__;padding:8px 14px 9px}.mast .headline{color:__INK__;margin-top:0}.mast .infobar .contact{margin-top:4px}.rsec h2{background:__TINT__;border-bottom:none;padding:5px 9px;color:__INK__}",
+        "banded": ".namebar{background:__ACCENT__;color:__ON_ACCENT__;padding:10px 14px}.mast .namebar h1{font-size:24px}.infobar{background:__TINT__;padding:8px 14px 9px}.mast .headline{color:__INK__;margin-top:0}.mast .infobar .contact{margin-top:4px}.rsec h2{background:__TINT__;border-bottom:none;padding:5px 9px;color:__INK__}",
         "plain": ".mast{border-bottom:1px solid __INK__;padding-bottom:10px}.mast h1{font-size:22px}.mast .headline{color:__MUTED__}.rsec h2{color:__INK__;border-bottom:1px solid __INK__;letter-spacing:.06em}.line.bullet{padding-left:0}.line.bullet:before{content:none}",
         "editorial": ".mast{border-bottom:1px solid __HAIR__;padding-bottom:12px}.mast h1{font-size:30px}.rsec{display:grid;grid-template-columns:92px minmax(0,1fr);column-gap:16px;align-items:start}.rsec h2{grid-column:1;border-bottom:none;padding:5px 0 0;font-size:9.5px;letter-spacing:.14em}.entries{grid-column:2;border-left:1px solid __HAIR__;padding-left:15px;margin-top:0}",
         "sidebar": ".mast{border-bottom:1px solid __HAIR__;padding-bottom:10px}.mast h1{font-size:27px}.cols{display:grid;grid-template-columns:minmax(0,30%) minmax(0,1fr);gap:18px;align-items:start}.rail{background:__TINT__;padding:12px 13px 14px}.rail .contact{font-size:9.3px;color:__INK__;margin-top:0;line-height:1.6}.rail .rsec{margin-top:12px}.rail .rsec:first-of-type{margin-top:0}.rail .rsec h2{border-bottom:none;padding:0;font-size:9.5px}.rail .entries{margin-top:4px}.rail .line{font-size:9.3px;margin-top:2px}.rail .lead{font-size:9.5px;margin-top:4px}.main .rsec{margin-top:14px}.main .rsec:first-child{margin-top:0}",
-        "balanced": ".ribbon{background:__ACCENT__;color:#fff;padding:16px 18px}.mast .ribbon h1{font-size:27px}.mast .ribbon .headline{color:#fff;margin-top:6px;font-weight:600}.mast>.contact{color:__ACCENT__;font-weight:600;margin-top:9px}.rsec{margin-top:calc(__SGAP__px + 4px)}.rsec h2{background:__ACCENT__;color:#fff;border-bottom:none;padding:5px 10px;letter-spacing:.1em}",
+        "balanced": ".ribbon{border-left:5px solid __ACCENT__;padding:5px 15px}.mast .ribbon h1{font-size:27px}.mast .ribbon .headline{color:__TEXT_ACCENT__;margin-top:6px;font-weight:600}.mast>.contact{font-weight:500;margin-top:9px}.rsec h2{border-left:3px solid __ACCENT__;border-bottom:none;padding:3px 9px;letter-spacing:.1em}",
     }.get(layout, "")
     css = CSS_TEMPLATE.replace("__EXTRA__", extra)
+    css = css.replace("color:__ACCENT__", "color:__TEXT_ACCENT__")
     for token, value in (("__FONT__", FONT_STACKS[tokens["family"]]), ("__INK__", tokens["ink"]), ("__ACCENT__", tokens["accent"]),
-                         ("__TINT__", tokens["tint"]), ("__HAIR__", tokens["hair"]), ("__MUTED__", tokens["muted"]),
+                          ("__TINT__", tokens["tint"]), ("__HAIR__", tokens["hair"]), ("__MUTED__", tokens["muted"]),
+                          ("__TEXT_ACCENT__", tokens["text_accent"]), ("__ON_ACCENT__", tokens["on_accent"]),
                          ("__PAD__", str(tokens["margin_mm"])), ("__SGAP__", "9" if tokens["compact"] else "16")):
         css = css.replace(token, value)
     return css
@@ -316,7 +329,7 @@ def _html_css(tokens: dict[str, Any]) -> str:
 def render_preview_html(snapshot: dict[str, Any], template_key: str) -> str:
     content = resume_content(snapshot)
     tokens = design_tokens(snapshot, template_key)
-    body = f'<div class="doc"><pre>{escape(content["text"])}</pre></div>' if content["imported"] else _html_body(content, tokens)
+    body = f'<div class="doc"><pre>{escape(content["text"])}</pre></div>' if content["imported"] and not content["sections"] else _html_body(content, tokens)
     title = escape(content["header"]["name"] or "Resume")
     css = _html_css(tokens)
     return ('<!doctype html><html><head><meta charset="utf-8">'
@@ -330,14 +343,17 @@ def render_preview_html(snapshot: dict[str, Any], template_key: str) -> str:
 def _styles(tokens: dict[str, Any]) -> dict[str, ParagraphStyle]:
     regular, bold = FAMILIES[tokens["family"]]
     ink = HexColor(tokens["ink"])
-    accent = HexColor(tokens["accent"])
+    accent = HexColor(tokens["text_accent"])
+    on_accent = HexColor(tokens["on_accent"])
     hair = HexColor(tokens["hair"])
     muted = HexColor(tokens["muted"])
     compact = tokens["compact"]
     body_size = 9.6 if compact else 10
     body_lead = 13 if compact else 14.5
     space_after = 2.5 if compact else 3.5
-    sgap = 9 if compact else 16
+    # Filled headings already have internal padding; use a smaller external gap
+    # than hairline/gutter themes to avoid unnecessary qualification-only pages.
+    sgap = 9 if compact else 12 if tokens["layout"] == "banded" else 16
     body = ParagraphStyle("rbody", fontName=regular, fontSize=body_size, leading=body_lead, textColor=ink, spaceAfter=space_after,
                           alignment=TA_LEFT, splitLongWords=True, allowWidows=0, allowOrphans=0, bulletFontName="ResumeSans", bulletFontSize=body_size, bulletColor=accent)
     return {
@@ -353,16 +369,16 @@ def _styles(tokens: dict[str, Any]) -> dict[str, ParagraphStyle]:
         "contact": ParagraphStyle("rcontact", parent=body, fontSize=9, leading=12.5, textColor=muted),
         "contact_center": ParagraphStyle("rcontactc", parent=body, fontSize=9, leading=12.5, textColor=muted, alignment=TA_CENTER),
         "contact_accent": ParagraphStyle("rcontacta", parent=body, fontSize=9.5, leading=13, textColor=accent, spaceBefore=8),
-        "band_name": ParagraphStyle("rbandn", parent=body, fontName=bold, fontSize=20, leading=24, textColor=white, spaceAfter=0),
+        "band_name": ParagraphStyle("rbandn", parent=body, fontName=bold, fontSize=20, leading=24, textColor=on_accent, spaceAfter=0),
         "band_headline": ParagraphStyle("rbandh", parent=body, fontSize=12, leading=15, textColor=ink, spaceAfter=0),
         "band_contact": ParagraphStyle("rbandc", parent=body, fontSize=8.5, leading=11, textColor=HexColor(MUTED), spaceAfter=0),
-        "ribbon_name": ParagraphStyle("rribbn", parent=body, fontName=bold, fontSize=21, leading=25, textColor=white, spaceAfter=0),
-        "ribbon_headline": ParagraphStyle("rribbh", parent=body, fontSize=11.5, leading=15, textColor=white, spaceAfter=0),
+        "ribbon_name": ParagraphStyle("rribbn", parent=body, fontName=bold, fontSize=21, leading=25, textColor=ink, spaceAfter=0),
+        "ribbon_headline": ParagraphStyle("rribbh", parent=body, fontSize=11.5, leading=15, textColor=accent, spaceAfter=0),
         "label": ParagraphStyle("rlabel", parent=body, fontName=bold, fontSize=9.4, leading=12, textColor=accent, spaceBefore=sgap, spaceAfter=3, keepWithNext=1),
         "label_center": ParagraphStyle("rlabelc", parent=body, fontName=bold, fontSize=9.4, leading=12, textColor=accent, spaceBefore=sgap, spaceAfter=3, keepWithNext=1, alignment=TA_CENTER),
         "label_ink": ParagraphStyle("rlabeli", parent=body, fontName=bold, fontSize=9.4, leading=12, textColor=ink, spaceBefore=sgap, spaceAfter=3, keepWithNext=1),
         "label_band_ink": ParagraphStyle("rlbandi", parent=body, fontName=bold, fontSize=9.4, leading=12, textColor=ink, spaceAfter=0),
-        "label_band_white": ParagraphStyle("rlbandw", parent=body, fontName=bold, fontSize=9.4, leading=12, textColor=white, spaceAfter=0),
+        "label_band_white": ParagraphStyle("rlbandw", parent=body, fontName=bold, fontSize=9.4, leading=12, textColor=accent, spaceAfter=0),
         "gutter_label": ParagraphStyle("rgutter", parent=body, fontName=bold, fontSize=8.5, leading=11, textColor=accent, spaceAfter=0),
         "hair": hair,
         "ink": ink,
@@ -382,11 +398,19 @@ def _band(flowables: list, background: HexColor, width: float, pad: tuple[int, i
     return table
 
 
+def _accent_block(flowables, accent, width, stroke, indent):
+    table = Table([[flowables]], colWidths=[width])
+    table.setStyle(TableStyle([("LINEBEFORE", (0, 0), (-1, -1), stroke, accent),
+                               ("LEFTPADDING", (0, 0), (-1, -1), indent), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                               ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]))
+    return table
+
+
 def _mast_flow(content: dict[str, Any], tokens: dict[str, Any], styles: dict[str, ParagraphStyle], width: float) -> list:
     header = content["header"]
     layout = tokens["layout"]
     name, headline, contact = header["name"], header["headline"], " · ".join(header["contact"])
-    if not name and not headline:
+    if not name and not headline and not contact:
         return []
     ink = HexColor(tokens["ink"])
     accent = HexColor(tokens["accent"])
@@ -413,7 +437,7 @@ def _mast_flow(content: dict[str, Any], tokens: dict[str, Any], styles: dict[str
             if name:
                 cells.append(Spacer(1, 6))
             cells.append(Paragraph(escape(headline), styles["ribbon_headline"]))
-        out = [_band(cells, accent, width, (15, 18, 15))] if cells else []
+        out = [_accent_block(cells, accent, width, 4, 12)] if cells else []
         if contact:
             out.append(Paragraph(_linked_text(contact), styles["contact_accent"]))
         return out
@@ -436,9 +460,15 @@ def _section_flow(content: dict[str, Any], tokens: dict[str, Any], styles: dict[
     out: list = []
     for section in content["sections"]:
         label = escape(section["label"].upper())
-        if layout in {"banded", "balanced"}:
+        if layout == "balanced":
+            band = _accent_block([Paragraph(label, styles["label_band_white"])], HexColor(tokens["accent"]), width, 2, 8)
+            band.spaceBefore = styles["sgap"]
+            band.spaceAfter = 5
+            band.keepWithNext = 1
+            out.append(band)
+        elif layout == "banded":
             band_style = styles["label_band_ink"] if layout == "banded" else styles["label_band_white"]
-            band = _band([Paragraph(label, band_style)], HexColor(tokens["tint"] if layout == "banded" else tokens["accent"]), width, (4, 9, 7))
+            band = _band([Paragraph(label, band_style)], HexColor(tokens["tint"] if layout == "banded" else tokens["accent"]), width, (3, 9, 4))
             band.keepWithNext = 1
             out.append(Spacer(1, styles["sgap"]))
             out.append(band)
@@ -539,7 +569,7 @@ def _pdf_imported(output: BytesIO, content: dict[str, Any], tokens: dict[str, An
     styles = _styles(tokens)
     story = []
     for line in content["text"].splitlines():
-        story.append(Paragraph(escape(line), styles["body"]) if line.strip() else Spacer(1, 5))
+        story.append(Paragraph(_linked_text(line), styles["body"]) if line.strip() else Spacer(1, 5))
     doc.build(story or [Paragraph("Resume", styles["body"])])
 
 
@@ -592,7 +622,7 @@ def _pdf_sidebar(output: BytesIO, content: dict[str, Any], tokens: dict[str, Any
     main_w = avail_w - rail_w - gap
     main_x = left + rail_w + gap
     ink = HexColor(tokens["ink"])
-    accent = HexColor(tokens["accent"])
+    accent = HexColor(tokens["text_accent"])
     hair = HexColor(tokens["hair"])
     tint = HexColor(tokens["tint"])
     muted = HexColor(MUTED)
@@ -705,7 +735,7 @@ def render_pdf(snapshot: dict[str, Any], template_key: str) -> bytes:
     tokens = design_tokens(snapshot, template_key)
     output = BytesIO()
     layout = tokens["layout"]
-    if content["imported"]:
+    if content["imported"] and not content["sections"]:
         _pdf_imported(output, content, tokens)
     elif layout == "sidebar":
         _pdf_sidebar(output, content, tokens)

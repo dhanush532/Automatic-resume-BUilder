@@ -13,9 +13,14 @@ from PIL import Image, ImageDraw, ImageOps
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "backend"), str(ROOT / "backend/tests")]
-from resume_quality_fixture import quality_snapshot, short_snapshot  # noqa: E402
+from resume_quality_fixture import (  # noqa: E402
+    imported_quality_snapshot,
+    quality_snapshot,
+    short_snapshot,
+)
 
 from app.services.pdf import render_pdf, render_preview_html  # noqa: E402
+from app.services.resume_tailoring import tailor_snapshot  # noqa: E402
 from app.services.resume_themes import THEMES  # noqa: E402
 
 parser = argparse.ArgumentParser(description=__doc__)
@@ -23,6 +28,9 @@ parser.add_argument("output", type=Path)
 parser.add_argument("--short", action="store_true")
 parser.add_argument("--rail", action="store_true")
 parser.add_argument("--edge", action="store_true", help="Maximum margins, monospace font, compact spacing")
+parser.add_argument("--imported", action="store_true", help="Exercise the imported-text theme pipeline")
+parser.add_argument("--light-accent", action="store_true", help="Exercise readable foregrounds on pale custom accents")
+parser.add_argument("--target", choices=("backend", "ml"), help="Generate an actual job-tailored draft before rendering")
 args = parser.parse_args()
 output = args.output
 output.mkdir(parents=True, exist_ok=True)
@@ -31,11 +39,19 @@ for key in THEMES:
     if args.rail and key != "developer":
         continue
     snapshot = short_snapshot() if args.short else quality_snapshot()
+    if args.imported:
+        snapshot = imported_quality_snapshot(long=not args.short)
     if args.rail:
         snapshot["projects"] = []
         snapshot["education"] = [{"degree": f"QualificationMarker{i}", "institution": "Example University", "description": "Verified education detail and relevant coursework. " * 5} for i in range(25)]
     if args.edge:
-        snapshot["resume_meta"]["design"] = {"margin_mm": 25, "font": "mono", "spacing": "compact", "accent": "#173c32"}
+        snapshot.setdefault("resume_meta", {})["design"] = {"margin_mm": 25, "font": "mono", "spacing": "compact", "accent": "#173c32"}
+    if args.light_accent:
+        snapshot.setdefault("resume_meta", {})["design"] = {"accent": "#ffffaa"}
+    if args.target:
+        title, description = (("Backend engineering internship", "Required: Python, FastAPI, PostgreSQL, Docker. Build backend services and validate retry handling.") if args.target == "backend"
+                              else ("AI/ML internship", "Required: PyTorch, scikit-learn, machine learning. Train classifiers and evaluate held-out datasets."))
+        snapshot = tailor_snapshot(snapshot, title, description)
     data = render_pdf(snapshot, key)
     (output / f"{key}.pdf").write_bytes(data)
     (output / f"{key}.html").write_text(render_preview_html(snapshot, key), encoding="utf-8")
@@ -68,8 +84,15 @@ for key in THEMES:
     sheet.save(output / f"{key}-all.png")
     count = 1 if args.short else 7
     markers = {f"Evidence{i}{letter}": text.count(f"Evidence{i}{letter}") for i in range(count) for letter in ("ABD" if args.short else "ABCD")} if not args.rail else {f"QualificationMarker{i}": len(re.findall(rf"\bQualificationMarker{i}\b", text)) for i in range(25)}
-    report[key] = {"pages": len(document), "outliers": outliers, "overlaps": overlaps, "markers": markers, "name_count": text.count("Alex Morgan"), "links": sum(len(page.get_links()) for page in document), "blank_pages": [i + 1 for i, page in enumerate(document) if not page.get_text().strip()]}
+    marker_order = list(markers)
+    if args.target and not args.rail:
+        marker_order = sorted(marker_order, key=lambda marker: (snapshot.get("imported_text", "").find(marker)
+                              if args.imported else next(index for index, project in enumerate(snapshot["projects"]) if marker in " ".join(str(value) for value in project.values())), marker[-1]))
+    marker_positions = [text.find(marker) for marker in marker_order]
+    ordered = marker_positions == sorted(marker_positions)
+    report[key] = {"pages": len(document), "outliers": outliers, "overlaps": overlaps, "markers": markers, "reading_order": ordered,
+                   "name_count": text.count("Alex Morgan"), "links": sum(len(page.get_links()) for page in document), "blank_pages": [i + 1 for i, page in enumerate(document) if not page.get_text().strip()]}
 (output / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
 print(json.dumps({key: {**{field: value for field, value in result.items() if field != "markers"}, "all_markers_once": all(count == 1 for count in result["markers"].values())} for key, result in report.items()}, indent=2))
-if any(result["outliers"] or result["overlaps"] or result["blank_pages"] or any(count != 1 for count in result["markers"].values()) for result in report.values()):
+if any(result["outliers"] or result["overlaps"] or result["blank_pages"] or not result["reading_order"] or any(count != 1 for count in result["markers"].values()) for result in report.values()):
     raise SystemExit("PDF QA found geometry or content-integrity defects; inspect report.json and rendered pages.")

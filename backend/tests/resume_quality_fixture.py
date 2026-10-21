@@ -34,3 +34,16 @@ def short_snapshot():
     snapshot["projects"][0].update(name="Project0 — Service catalog", problem_solved="", technology_notes="Python, FastAPI, PostgreSQL, Docker", github_url="https://github.com/example/catalog")
     snapshot["experience"][0].update(title="Software engineering intern", company="Example Laboratory")
     return snapshot
+
+
+def imported_quality_snapshot(long=True):
+    source = quality_snapshot(long) if long else short_snapshot()
+    lines = ["Alex Morgan", "alex@example.com | https://github.com/example", "Summary", source["profile"]["bio"], "Projects"]
+    for project in source["projects"]:
+        lines.append(project["name"])
+        for field in ("description", "features", "problem_solved", "results"):
+            if project.get(field):
+                lines.append("- " + project[field])
+        lines.extend(["Technologies: " + project["technology_notes"], project["github_url"], ""])
+    lines.extend(["Skills", "Python, FastAPI, PostgreSQL, Docker, PyTorch, scikit-learn", "Education", "BSc Computer Science, Example Technical University", "Verified coursework: algorithms and distributed systems."])
+    return {"source": "document_import", "imported_text": "\n".join(lines)}

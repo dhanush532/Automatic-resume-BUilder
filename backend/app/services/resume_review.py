@@ -19,8 +19,8 @@ SECTION_NAMES = {
     "certifications": ("certifications", "certificates", "licenses"),
     "achievements": ("achievements", "awards", "honors"),
 }
-SKILLS = ("Python", "JavaScript", "TypeScript", "React", "Next.js", "Node.js", "SQL", "PostgreSQL", "MongoDB", "Redis", "Docker", "Kubernetes", "AWS", "Azure", "GCP", "Git", "Java", "C++", "C#", "Go", "Rust", "HTML", "CSS", "Tailwind", "FastAPI", "Django", "Flask", "Spring", "GraphQL", "REST", "Figma", "Excel", "Tableau", "Power BI", "TensorFlow", "PyTorch", "Pandas", "NumPy", "Linux", "Agile", "Scrum", "Salesforce", "SEO", "Project management", "Data analysis", "Communication", "Leadership")
-ACTION = re.compile(r"^(?:[•*\-–]\s*)?(built|developed|designed|led|created|implemented|improved|reduced|increased|delivered|launched|managed|optimized|automated|achieved|analyzed|collaborated|deployed|supported|maintained|resolved|organized|researched)\b", re.I)
+SKILLS = ("Python", "JavaScript", "TypeScript", "React", "Next.js", "Node.js", "SQL", "PostgreSQL", "MongoDB", "Redis", "Docker", "Kubernetes", "AWS", "Azure", "GCP", "Git", "Java", "C++", "C#", "Go", "Rust", "HTML", "CSS", "Tailwind", "FastAPI", "Django", "Flask", "Spring", "GraphQL", "REST", "Figma", "Excel", "Tableau", "Power BI", "TensorFlow", "PyTorch", "Pandas", "NumPy", "Linux", "Agile", "Scrum", "Salesforce", "SEO", "Project management", "Data analysis", "Communication", "Leadership", "scikit-learn", "Machine learning", "CI/CD", "OpenTelemetry")
+ACTION = re.compile(r"^(?:[•*\-–]\s*|\d+[.)]\s*)?(built|build|building|developed|develop|developing|designed|design|designing|led|lead|leading|created|create|creating|implemented|implement|implementing|improved|improve|improving|reduced|reduce|reducing|increased|delivered|launched|managed|optimized|automated|achieved|analyzed|collaborated|deployed|supported|maintained|maintain|maintaining|resolved|organized|researched|trained|evaluated|tested|wrote|documented)\b", re.I)
 
 
 @apply_configuration(maximum_declared_stream_length=4_000_000, zlib_maximum_output_length=4_000_000,
@@ -85,6 +85,38 @@ def find_skills(text: str) -> list[str]:
     return [skill for skill in SKILLS if re.search(r"(?<![\w+#])" + re.escape(skill) + r"(?![\w+#])", text, re.I)]
 
 
+def find_evidenced_skills(text: str) -> list[str]:
+    """Screen English mentions for explicit lack of experience or future plans.
+
+    This is bounded evidence screening, not semantic verification. A separate
+    positive mention can still evidence a skill used elsewhere.
+    """
+    clauses = re.split(r"[\n;!?]|\.(?=\s|$)|\b(?:but|however)\b", text, flags=re.I)
+    negative = re.compile(
+        r"\b(?:no(?:\s+(?:prior|hands.on))?\s+(?:experience|knowledge|exposure|familiarity|proficiency)(?:\s+(?:in|with|of))?"
+        r"|lack(?:s|ing)?\s+(?:experience|knowledge)(?:\s+(?:in|with|of))?"
+        r"|not\s+(?:experienced|familiar|proficient)(?:\s+(?:in|with))?"
+        r"|(?:do not|don't|never)\s+(?:know|use|used|learned|implemented)"
+        r"|(?:plan(?:ning)?|intend(?:ing)?|hope|want)\s+to|will\s+(?:learn|use|implement)|without\s+(?:using|knowing))\b[^;.!?]{0,90}$", re.I)
+    evidenced = set()
+    for clause in clauses:
+        for skill in find_skills(clause):
+            for match in re.finditer(r"(?<![\w+#])" + re.escape(skill) + r"(?![\w+#])", clause, re.I):
+                prefix = clause[:match.start()]
+                if not negative.search(prefix) and not re.search(r"\bno\s*$", prefix, re.I):
+                    evidenced.add(skill)
+                    break
+    return [skill for skill in SKILLS if skill in evidenced]
+
+
+def has_impact_evidence(line: str) -> bool:
+    """Require an observable unit/outcome, not just a date or software version."""
+    if re.search(r"\b(?:will|plan(?:ning)?\s+to|target(?:ing)?|aim(?:ing)?\s+to)\b", line, re.I):
+        return False
+    return bool(re.search(
+        r"\d+(?:[.,]\d+)?\s*(?:%|percent\b|users?\b|customers?\b|requests?\b|services?\b|teams?\b|engineers?\b|records?\b|documents?\b|tests?\b|hours?\b|minutes?\b|seconds?\b|milliseconds?\b|ms\b|GB\b|MB\b|x\s+(?:faster|throughput)|projects?\b|endpoints?\b|pipelines?\b|datasets?\b|models?\b)|[$€£]\s*\d+", line, re.I))
+
+
 def review_resume(text: str, job_description: str = "") -> dict:
     text = text.replace("\x00", "").strip()
     lines = [line.strip() for line in text.splitlines() if line.strip()]
@@ -101,7 +133,7 @@ def review_resume(text: str, job_description: str = "") -> dict:
             sections[current].append(line)
     email = re.search(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", text)
     action_lines = [line for line in lines if ACTION.search(line)]
-    quantified = [line for line in action_lines if re.search(r"\d", line)]
+    quantified = [line for line in action_lines if has_impact_evidence(line)]
     checks = []
 
     def check(key, title, passed, weight, detail, suggestion, evidence=None):
@@ -112,11 +144,11 @@ def review_resume(text: str, job_description: str = "") -> dict:
     check("experience", "Experience or projects", sections.get("experience") or sections.get("projects"), 20, "Checks for a recognizable experience or projects section.", "Use a clear Experience or Projects heading and describe work you actually did.")
     check("education", "Education context", sections.get("education"), 10, "Checks for a recognizable education section.", "Add an Education heading with your qualification and institution.")
     check("skills", "Skills section", sections.get("skills"), 10, "Checks for a clearly labeled skills section.", "Group relevant skills under a Skills heading; include only skills you can demonstrate.")
-    check("impact", "Evidence of impact", len(quantified) >= 2, 20, f"{len(quantified)} action-led lines contain numbers.", "Where accurate, add scale or outcomes to two bullets: users served, time saved, scope, or measurable results.", quantified)
+    check("impact", "Evidence of impact", len(quantified) >= 2, 20, f"{len(quantified)} action-led lines describe measurable scope or outcomes; dates, tool versions and future targets do not count.", "Where known, describe observable scope or outcomes. Accurate non-quantified implementation detail is also useful; never invent a metric to pass this check.", quantified)
     check("actions", "Action-led writing", len(action_lines) >= 3, 10, f"{len(action_lines)} lines start with recognized action verbs.", "Start bullets with a specific action such as Built, Analyzed, Led, or Delivered.", action_lines)
     check("links", "Supporting links", re.search(r"(?:https?://|linkedin\.com/|github\.com/)", text, re.I), 5, "Checks for a portfolio or professional URL.", "Add a relevant portfolio, LinkedIn, or GitHub link if it strengthens your application.")
     target_skills = find_skills(job_description)
-    detected = find_skills(text)
+    detected = find_evidenced_skills(text)
     matched = [skill for skill in target_skills if skill in detected]
     missing = [skill for skill in target_skills if skill not in detected]
     name = lines[0] if lines and len(lines[0]) <= 80 and "@" not in lines[0] else ""

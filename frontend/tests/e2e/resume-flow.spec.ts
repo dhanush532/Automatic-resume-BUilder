@@ -44,6 +44,8 @@ test("real upload, evaluation, job comparison, export and sign-in handoff", asyn
   await page.getByLabel("Job description", { exact: true }).fill("We need Python and React experience. Kubernetes is required.");
   await page.getByRole("button", { name: "Show me the improvements" }).click();
   await expect(page.getByRole("heading", { name: "Your next improvements" })).toBeVisible();
+  await expect(page.getByText("EVIDENCE, NOT A SCORE", { exact: true })).toBeVisible();
+  await expect(page.locator(".score-ring")).toHaveCount(0);
   await expect(page.getByText("Kubernetes", { exact: true })).toBeVisible();
   await expect(page.getByText("Not detected — include only if true")).toBeVisible();
   for (const panel of await page.locator(".result-reveal").all()) { await expect(panel).toHaveCSS("opacity", "1"); }
