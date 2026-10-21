@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from base64 import b64encode
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -142,7 +143,8 @@ def draft_preview(payload: ResumeDraftPreview, response: Response,
         raise HTTPException(422, str(exc)) from exc
     key = "ats_readable" if payload.ats_safe else template.template_key
     response.headers["Cache-Control"] = "no-store"
-    return {"html": render_preview_html(snapshot, key), "template_key": key}
+    return {"html": render_preview_html(snapshot, key), "template_key": key,
+            **({"pdf_base64": b64encode(render_pdf(snapshot, key)).decode("ascii")} if payload.include_pdf else {})}
 
 
 @router.get("", response_model=list[ResumeResponse])
@@ -304,7 +306,8 @@ def create_version(
         resume.template_id = _template(db, payload.template_id).id
     edit = ResumeContentEdit.model_validate(payload.model_dump(exclude={"change_summary", "name", "template_id"}))
     latest = _latest_version(db, resume.id)
-    base = latest.content_snapshot if latest and (latest.content_snapshot.get("source") in {"document_import", "job_tailored"} or "job_target" in latest.content_snapshot) else build_passport_snapshot(db, authenticated.user.id)
+    editing_saved_draft = bool(payload.model_fields_set - {"change_summary"})
+    base = latest.content_snapshot if latest and (editing_saved_draft or latest.content_snapshot.get("source") in {"document_import", "job_tailored"} or "job_target" in latest.content_snapshot) else build_passport_snapshot(db, authenticated.user.id)
     if latest and "design" in latest.content_snapshot.get("resume_meta", {}):
         base.setdefault("resume_meta", {})["design"] = latest.content_snapshot["resume_meta"]["design"]
     try:
@@ -371,6 +374,7 @@ def _selected_version(db: Session, user_id: UUID, resume_id: UUID, version_id: U
 def preview_resume(
     resume_id: UUID,
     version_id: UUID | None = Query(default=None),
+    include_pdf: bool = Query(default=False),
     authenticated: AuthenticatedRequest = Depends(require_authenticated_request),
     db: Session = Depends(get_db_session),
 ) -> ResumePreviewResponse:
@@ -378,7 +382,9 @@ def preview_resume(
     template = db.get(ResumeTemplate, version.template_id)
     if not template:
         raise _not_found()
-    return ResumePreviewResponse(resume_id=resume_id, version_id=version.id, template_key=template.template_key, html=render_preview_html(version.content_snapshot, template.template_key))
+    return ResumePreviewResponse(resume_id=resume_id, version_id=version.id, template_key=template.template_key,
+                                 html=render_preview_html(version.content_snapshot, template.template_key),
+                                 pdf_base64=b64encode(render_pdf(version.content_snapshot, template.template_key)).decode("ascii") if include_pdf else None)
 
 
 @router.get("/{resume_id}/pdf")
@@ -394,7 +400,7 @@ def export_pdf(
     if not template:
         raise _not_found()
     pdf = render_pdf(version.content_snapshot, "ats_readable" if ats_safe else template.template_key)
-    return StreamingResponse(iter([pdf]), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="resume-{resume_id}.pdf"'})
+    return StreamingResponse(iter([pdf]), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="resume-{resume_id}.pdf"', "Cache-Control": "no-store"})
 
 
 @router.get("/{resume_id}/customizations", response_model=list[ResumeCustomizationResponse])

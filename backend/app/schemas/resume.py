@@ -188,6 +188,7 @@ class ResumePreviewResponse(BaseModel):
     version_id: UUID
     template_key: str
     html: str
+    pdf_base64: str | None = None
 
 
 class ResumeDraftPreview(BaseModel):
@@ -195,3 +196,4 @@ class ResumeDraftPreview(BaseModel):
     base_resume_id: UUID | None = None
     edits: ResumeContentEdit = Field(default_factory=ResumeContentEdit)
     ats_safe: bool = False
+    include_pdf: bool = False

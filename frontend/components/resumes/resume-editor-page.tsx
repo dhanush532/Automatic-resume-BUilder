@@ -17,6 +17,24 @@ type Snapshot = { source?: string; imported_text?: string; profile?: { headline?
 
 const DEFAULT_DESIGN: Design = { accent: null, font: "theme", spacing: "comfortable", margin_mm: 17 };
 
+// Preview and download share the same immutable PDF bytes, including unsaved edits.
+function usePdfUrl(base64: string) {
+  const [document, setDocument] = useState({ base64: "", url: "" });
+  useEffect(() => {
+    if (!base64) { setDocument({ base64: "", url: "" }); return; }
+    const bytes = Uint8Array.from(atob(base64), character => character.charCodeAt(0));
+    const next = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+    setDocument({ base64, url: next });
+    return () => URL.revokeObjectURL(next);
+  }, [base64]);
+  return document.base64 === base64 ? document.url : "";
+}
+
+function PdfThumbnail({ pdf, name }: { pdf: string; name: string }) {
+  const url = usePdfUrl(pdf);
+  return url ? <iframe title={`${name} document thumbnail`} aria-hidden tabIndex={-1} src={`${url}#toolbar=0&navpanes=0&view=FitH`} className="pointer-events-none absolute left-0 top-0 h-[1000px] w-[700px] origin-top-left scale-[0.27]" /> : null;
+}
+
 export function ResumeEditorPage({ resumeId }: { resumeId: string }) {
   const router = useRouter();
   const [resume, setResume] = useState<Resume | null>(null);
@@ -29,7 +47,10 @@ export function ResumeEditorPage({ resumeId }: { resumeId: string }) {
   const [hidden, setHidden] = useState<string[]>([]);
   const [design, setDesign] = useState<Design>(DEFAULT_DESIGN);
   const [atsSafe, setAtsSafe] = useState(false);
-  const [previewHtml, setPreviewHtml] = useState("");
+  const [previewPdf, setPreviewPdf] = useState("");
+  const [previewKey, setPreviewKey] = useState("");
+  const [previewError, setPreviewError] = useState("");
+  const previewUrl = usePdfUrl(previewPdf);
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
   const [jobTitle, setJobTitle] = useState("");
   const [jobDescription, setJobDescription] = useState("");
@@ -57,28 +78,31 @@ export function ResumeEditorPage({ resumeId }: { resumeId: string }) {
   const edits = useMemo(() => (imported
     ? { ...(text.trim().length >= 80 ? { imported_text: text } : {}), design }
     : { headline_override: headline, summary_override: summary, hidden_sections: hidden, design }), [imported, text, design, headline, summary, hidden]);
+  const draftKey = JSON.stringify({ templateId, edits, atsSafe, resumeId, version: resume?.latest_version?.id });
+  const currentPdfUrl = previewKey === draftKey && !previewError && (!imported || text.trim().length >= 80) ? previewUrl : "";
 
   useEffect(() => {
     if (!resume || !templateId) return;
     const controller = new AbortController();
     const timer = setTimeout(() => {
-      void apiRequest<{ html: string }>("/resumes/preview", { method: "POST", body: JSON.stringify({ template_id: templateId, base_resume_id: resumeId, edits, ats_safe: atsSafe }), signal: controller.signal })
-        .then(result => setPreviewHtml(result.html))
-        .catch(() => undefined);
+      setPreviewError("");
+      void apiRequest<{ pdf_base64: string }>("/resumes/preview", { method: "POST", body: JSON.stringify({ template_id: templateId, base_resume_id: resumeId, edits, ats_safe: atsSafe, include_pdf: true }), signal: controller.signal })
+        .then(result => { if (!controller.signal.aborted) { setPreviewPdf(result.pdf_base64); setPreviewKey(draftKey); } })
+        .catch(caught => { if (!controller.signal.aborted) setPreviewError(caught instanceof Error ? caught.message : "Could not render the document. Try again."); });
     }, 400);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [resume, resumeId, templateId, edits, atsSafe]);
+  }, [resume, resumeId, templateId, edits, atsSafe, draftKey]);
 
   useEffect(() => {
     if (!resume || !templates.length) return;
     const controller = new AbortController();
     const timer = setTimeout(() => {
-      void Promise.all(templates.map(template => apiRequest<{ html: string }>("/resumes/preview", { method: "POST", body: JSON.stringify({ template_id: template.id, base_resume_id: resumeId, edits, ats_safe: atsSafe }), signal: controller.signal })
-        .then(result => [template.id, result.html] as const).catch(() => null)))
+      void Promise.all(templates.map(template => apiRequest<{ pdf_base64: string }>("/resumes/preview", { method: "POST", body: JSON.stringify({ template_id: template.id, base_resume_id: resumeId, edits, include_pdf: true }), signal: controller.signal })
+        .then(result => [template.id, result.pdf_base64] as const).catch(() => null)))
         .then(pairs => { if (!controller.signal.aborted) setThumbs(Object.fromEntries(pairs.filter((pair): pair is readonly [string, string] => pair !== null))); });
     }, 1200);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [resume, templates, resumeId, edits, atsSafe]);
+  }, [resume, templates, resumeId, edits]);
 
   async function save() {
     setSaving(true); setError(""); setNotice("");
@@ -111,12 +135,11 @@ export function ResumeEditorPage({ resumeId }: { resumeId: string }) {
   }
 
   const activeTheme = templates.find(template => template.id === templateId);
-  const pdfHref = `${apiBaseUrl}/resumes/${resumeId}/pdf${atsSafe ? "?ats_safe=true" : ""}`;
 
   if (loading) return <ResumeShell title="Opening your resume…" description="Getting your latest draft."><Card className="p-8" role="status">Loading resume…</Card></ResumeShell>;
   if (!resume) return <ResumeShell title="Let’s get you back on track." description="This resume could not be opened."><Notice>{error}</Notice><Link className="mt-5 inline-block text-brand underline" href="/login">Sign in</Link><Link className="ml-5 text-brand underline" href="/resumes">My resumes</Link></ResumeShell>;
   return <ResumeShell title={resume.name} description={imported ? "Your imported resume, ready for the next draft. Pick a theme, fine-tune the text and keep every version." : "Choose a theme, fine-tune your resume and keep every version — without changing the facts in your career profile."}>
-    <div className="flex flex-wrap items-center justify-between gap-3"><Link className="inline-flex items-center gap-2 text-sm text-muted" href="/resumes"><ArrowLeft size={16} />My resumes</Link><div className="flex flex-wrap gap-2"><Button asChild variant="secondary"><Link href={`/resumes/${resumeId}/preview`}><Eye size={16} />Saved preview</Link></Button><Button asChild variant="secondary"><Link href={`/resumes/${resumeId}/versions`}><History size={16} />History</Link></Button><Button asChild variant="secondary"><a href={pdfHref}><Download size={16} />Download PDF</a></Button></div></div>
+    <div className="flex flex-wrap items-center justify-between gap-3"><Link className="inline-flex items-center gap-2 text-sm text-muted" href="/resumes"><ArrowLeft size={16} />My resumes</Link><div className="flex flex-wrap gap-2"><Button asChild variant="secondary"><Link href={`/resumes/${resumeId}/preview`}><Eye size={16} />Saved preview</Link></Button><Button asChild variant="secondary"><Link href={`/resumes/${resumeId}/versions`}><History size={16} />History</Link></Button><Button asChild variant="secondary"><a role="link" tabIndex={currentPdfUrl ? 0 : -1} href={currentPdfUrl || undefined} aria-disabled={!currentPdfUrl} onClick={event => { if (!currentPdfUrl) event.preventDefault(); }} download="resume.pdf"><Download size={16} />Download PDF</a></Button></div></div>
     {error && <Notice>{error}</Notice>}{notice && <p className="mt-5 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800" role="status">{notice}</p>}
     <div className="mt-6 grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
       <div>
@@ -137,7 +160,7 @@ export function ResumeEditorPage({ resumeId }: { resumeId: string }) {
                     {template.ats_safe && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-800">ATS</span>}
                   </span>
                   <span className="relative mt-2 block h-[150px] w-full overflow-hidden rounded-lg border bg-white">
-                    {thumbs[template.id] ? <iframe aria-hidden tabIndex={-1} sandbox="" srcDoc={thumbs[template.id]} className="pointer-events-none absolute left-0 top-0 h-[980px] w-[700px] origin-top-left scale-[0.27]" /> : <span className="flex h-full items-center justify-center text-[11px] text-muted" role="status">Rendering…</span>}
+                    {thumbs[template.id] ? <PdfThumbnail pdf={thumbs[template.id]} name={template.display_name ?? template.name} /> : <span className="flex h-full items-center justify-center text-[11px] text-muted" role="status">Rendering…</span>}
                   </span>
                   <span className="mt-2 block text-[11px] leading-5 text-muted">{template.description}</span>
                 </label>
@@ -200,10 +223,12 @@ export function ResumeEditorPage({ resumeId }: { resumeId: string }) {
 
       <Card className="p-6 lg:sticky lg:top-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div><h2 className="text-lg font-semibold">Live preview</h2><p className="mt-1 text-xs text-muted">Updates as you edit — nothing is saved until you choose to.</p></div>
-          <Button asChild variant="secondary"><a href={pdfHref}><Download size={16} />PDF</a></Button>
+          <div><h2 className="text-lg font-semibold">Live document preview</h2><p className="mt-1 text-xs text-muted">The actual A4 PDF, including unsaved edits. Download uses these same document bytes.</p></div>
+          <Button asChild variant="secondary"><a role="link" tabIndex={currentPdfUrl ? 0 : -1} href={currentPdfUrl || undefined} aria-disabled={!currentPdfUrl} onClick={event => { if (!currentPdfUrl) event.preventDefault(); }} download="resume.pdf"><Download size={16} />PDF</a></Button>
         </div>
-        {previewHtml ? <iframe title="Live resume preview" sandbox="" srcDoc={previewHtml} className="mt-4 h-[860px] w-full rounded-xl border bg-white" /> : <div className="mt-4 flex h-[320px] items-center justify-center rounded-xl border bg-white text-sm text-muted" role="status">Rendering preview…</div>}
+        {previewError && <Notice>{previewError}</Notice>}
+        {previewUrl && !currentPdfUrl && !previewError && <p className="mt-3 text-xs text-muted" role="status">Updating the document… Download is available when the current draft is ready.</p>}
+        {previewUrl ? <><iframe title="Live resume preview" src={`${previewUrl}#toolbar=0&navpanes=0&view=FitH`} className="mt-4 h-[860px] w-full rounded-xl border bg-white" /><a href={previewUrl} target="_blank" rel="noreferrer" className="mt-3 inline-block text-xs text-brand underline">Open the actual PDF in a new tab</a></> : <div className="mt-4 flex h-[320px] items-center justify-center rounded-xl border bg-white text-sm text-muted" role="status">Rendering preview…</div>}
       </Card>
     </div>
   </ResumeShell>;
@@ -230,13 +255,14 @@ export function ResumeVersionsPage({ resumeId }: { resumeId: string }) {
 
 export function ResumePreviewPage({ resumeId }: { resumeId: string }) {
   const params = useSearchParams(); const version = params.get("version");
-  const [preview, setPreview] = useState<{ html: string } | null>(null); const [error, setError] = useState("");
+  const [preview, setPreview] = useState<{ pdf_base64: string } | null>(null); const [error, setError] = useState("");
+  const pdfUrl = usePdfUrl(preview?.pdf_base64 ?? "");
   useEffect(() => {
     const controller = new AbortController(); setPreview(null); setError("");
-    void apiRequest<{ html: string }>(`/resumes/${resumeId}/preview${version ? `?version_id=${encodeURIComponent(version)}` : ""}`, { signal: controller.signal }).then(setPreview).catch(caught => { if (!controller.signal.aborted) setError(caught instanceof ApiError ? caught.message : "Could not load preview."); });
+    void apiRequest<{ pdf_base64: string }>(`/resumes/${resumeId}/preview?include_pdf=true${version ? `&version_id=${encodeURIComponent(version)}` : ""}`, { signal: controller.signal }).then(setPreview).catch(caught => { if (!controller.signal.aborted) setError(caught instanceof ApiError ? caught.message : "Could not load preview."); });
     return () => controller.abort();
   }, [resumeId, version]);
-  return <ResumeShell title="Ready for a closer look." description="Review the saved content before you send it."><div className="flex flex-wrap justify-between gap-3"><Link className="text-sm text-brand underline" href={`/resumes/${resumeId}`}>← Back to editor</Link><Button asChild variant="secondary"><a href={`${apiBaseUrl}/resumes/${resumeId}/pdf${version ? `?version_id=${encodeURIComponent(version)}` : ""}`}><Download size={16} />Download this version</a></Button></div>{error && <Notice>{error}</Notice>}{!preview && !error && <Card className="mt-6 p-8">Loading preview…</Card>}{preview && <iframe title="Saved resume preview" sandbox="" srcDoc={preview.html} className="mt-6 h-[1000px] w-full rounded-xl border bg-white" />}</ResumeShell>;
+  return <ResumeShell title="Ready for a closer look." description="Review the actual saved PDF before you send it."><div className="flex flex-wrap justify-between gap-3"><Link className="text-sm text-brand underline" href={`/resumes/${resumeId}`}>← Back to editor</Link><Button asChild variant="secondary"><a href={`${apiBaseUrl}/resumes/${resumeId}/pdf${version ? `?version_id=${encodeURIComponent(version)}` : ""}`}><Download size={16} />Download this version</a></Button></div>{error && <Notice>{error}</Notice>}{!preview && !error && <Card className="mt-6 p-8">Loading preview…</Card>}{pdfUrl && <iframe title="Saved resume preview" src={`${pdfUrl}#toolbar=0&navpanes=0&view=FitH`} className="mt-6 h-[1000px] w-full rounded-xl border bg-white" />}</ResumeShell>;
 }
 
 function formatDate(value: string) { return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)); }

@@ -8,7 +8,7 @@ from app.services.resume_review import find_skills
 from app.services.resume_themes import recommended_theme
 
 STOP = set("a an the and or for to of in on with as is are be by we you your our will can have has this that from at role team candidate work looking required preferred must should ability strong excellent experience knowledge skills responsibilities qualifications requirements including using".split())
-VERBS = {"building": "built", "developing": "developed", "designing": "designed", "implementing": "implemented", "managing": "managed", "creating": "created", "maintaining": "maintained", "testing": "tested", "deploying": "deployed", "optimizing": "optimized", "supporting": "supported", "analyzing": "analyzed", "leading": "led"}
+ONGOING_VERBS = {"building", "developing", "designing", "implementing", "managing", "creating", "maintaining", "testing", "deploying", "optimizing", "supporting", "analyzing", "leading"}
 
 
 def terms(text):
@@ -24,7 +24,7 @@ def text_of(value):
 
 
 def concise(line):
-    """Only grammar-preserving filler removal and inflection; all numbers/nouns remain."""
+    """Remove filler without turning responsibility or ongoing work into completion."""
     line = re.sub(r"^[\s•\u25a1\u25aa*\-]+", "", line).strip()
     match = re.match(r"(?:I was responsible for|Responsible for|Worked on|Helped with)\s+(.+)", line, re.I)
     if match:
@@ -33,23 +33,37 @@ def concise(line):
             return line
         rest = match.group(1)
         first, separator, tail = rest.partition(" ")
-        if first.lower() in VERBS:
-            return VERBS[first.lower()].capitalize() + separator + tail
+        if first.lower() in ONGOING_VERBS:
+            return first.capitalize() + separator + tail
     return line
 
 
 def analyze_job(title, description, evidence):
     keywords = list(dict.fromkeys(terms(title + " " + description)))[:100]
-    known = find_skills(description)
+    known = find_skills(title + " " + description)
     evidence_skills = set(find_skills(evidence))
     evidence_terms = set(terms(evidence))
     lines = [re.sub(r"^[\s•*\-]+", "", line).strip() for line in re.split(r"[\n;]+", description)]
-    qualifications = [line for line in lines if re.search(r"\b(required|must|degree|bachelor|master|certif|years?|qualification|license)", line, re.I)][:25]
+    required, preferred = [], []
+    category = required
+    for line in lines:
+        if re.search(r"\b(preferred|nice.to.have|bonus|desirable)\b", line, re.I):
+            category = preferred
+        elif re.search(r"\b(required|requirements|must|essential|minimum)\b", line, re.I):
+            category = required
+        if re.search(r"\b(responsibilities|what you.ll do)\b", line, re.I):
+            category = None
+        if category is not None and line:
+            category.append(line)
+    qualifications = list(dict.fromkeys(required + preferred))[:25]
     responsibilities = [line for line in lines if re.search(r"\b(build|develop|design|maintain|lead|manage|deliver|implement|analy[sz]e|responsib|collaborat|support)", line, re.I)][:25]
     missing_skills = [skill for skill in known if skill not in evidence_skills]
     # Qualifications require review unless the exact claim is already in the evidence.
-    missing = missing_skills + [line for line in qualifications if line.casefold() not in evidence.casefold()]
-    return {"skills": known, "keywords": keywords, "qualifications": qualifications, "responsibilities": responsibilities,
+    missing = missing_skills + [line for line in qualifications
+                               if line.casefold() not in evidence.casefold()
+                               and (re.search(r"\b(degree|bachelor|master|certif\w*|years?|license|eligib\w*|authori[sz]\w*)\b", line, re.I)
+                                    or (not find_skills(line) and not line.endswith(":")))]
+    return {"skills": known, "keywords": keywords, "qualifications": qualifications, "required_qualifications": required[:25], "preferred_qualifications": preferred[:25], "responsibilities": responsibilities,
             "matched_keywords": [word for word in keywords if word in evidence_terms], "missing_qualifications": list(dict.fromkeys(missing)),
             "qualification_note": "Not evidenced / needs your review. Keyword overlap alone does not establish a degree, seniority, eligibility or certification."}
 
@@ -61,12 +75,26 @@ def tailor_snapshot(source, title, description):
         raise ValueError("Add experience, projects or an existing resume before generating a job-specific draft.")
     analysis = analyze_job(title, description, evidence)
     targets = set(terms(title + " " + description))
+    title_terms = set(terms(title))
+    required_terms = set(terms(" ".join(analysis["required_qualifications"])))
+    target_skills = set(analysis["skills"])
+    source_skills = {str(item.get("skill_id")): item.get("name", "") for item in source.get("skills", []) if item.get("skill_id")}
 
     def relevance(value):
-        return len(set(terms(text_of(value))) & targets)
+        text = text_of(value)
+        if isinstance(value, dict):
+            text += " " + " ".join(source_skills.get(str(key), "") for key in value.get("skill_ids", []))
+        words = set(terms(text))
+        # Technical matches outweigh generic words; job-title and required terms
+        # outweigh preferred terms. Linked project/experience skills count too.
+        return 5 * len(set(find_skills(text)) & target_skills) + 3 * len(words & title_terms) + 2 * len(words & required_terms) + len(words & targets)
 
     method = "grounded_rules"
     provider_note = "No external AI provider is configured; wording is conservatively edited from your own evidence."
+    base_bio = (source.get("profile") or {}).get("bio") or ""
+    previous = source.get("job_target") or {}
+    if base_bio == previous.get("generated_summary"):
+        base_bio = previous.get("base_summary", base_bio)
     if result.get("source") == "document_import":
         # Unstructured imports cannot safely infer project boundaries or structured facts.
         # Preserve their reading order, but tighten explicit action-led wording line by line.
@@ -78,18 +106,18 @@ def tailor_snapshot(source, title, description):
             for record in result.get(section, []):
                 for field in ("description", "achievements", "results", "features", "problem_solved"):
                     if record.get(field):
-                        lines = [concise(line) for line in str(record[field]).splitlines() if line.strip()]
+                        lines = list(dict.fromkeys(concise(line) for line in str(record[field]).splitlines() if line.strip()))
                         record[field] = "\n".join(sorted(lines, key=relevance, reverse=True))
         profile = result.setdefault("profile", {})
         summary = []
-        if profile.get("bio"):
-            summary.append(str(profile["bio"]).strip())
+        if base_bio and len(base_bio) <= 280:
+            summary.append(str(base_bio).strip())
         relevant_skills = [item["name"] for item in result.get("skills", []) if relevance(item)]
         if relevant_skills:
-            summary.append("Relevant skills: " + ", ".join(relevant_skills[:10]) + ".")
-        projects = [item["name"] for item in result.get("projects", []) if relevance(item)]
-        if projects:
-            summary.append("Selected work: " + "; ".join(projects[:2]) + ".")
+            summary.append("Relevant skills: " + ", ".join(relevant_skills[:6]) + ".")
+        evidence_lines = [line for section in ("experience", "projects") for record in result.get(section, []) for field in ("description", "features", "results") for line in str(record.get(field) or "").splitlines() if 25 <= len(line) <= 230 and relevance(line)]
+        if evidence_lines:
+            summary.append(max(evidence_lines, key=relevance))
         if not summary:
             roles = [" at ".join(filter(None, [item.get("title"), item.get("company")])) for item in result.get("experience", [])]
             summary.append("Experience: " + "; ".join(roles[:2]) + "." if roles else "Career background presented for review against the target role.")
@@ -112,7 +140,9 @@ def tailor_snapshot(source, title, description):
                 continue
 
             def normalized(value: Any) -> list[str]:
-                return terms(concise(str(value)))
+                # Do not remove stop words here: 'will', 'not', 'without', etc.
+                # carry factual meaning even though they are irrelevant to ranking.
+                return re.findall(r"[\w]+(?:[.+#-][\w+#]+)*", concise(str(value)).casefold())
 
             # Preserve negation and metrics as well as word order.
             if normalized(replacement) != normalized(original.get(field, "")) or re.findall(r"\d+(?:\.\d+)?%?", replacement) != re.findall(r"\d+(?:\.\d+)?%?", str(original.get(field, ""))):
@@ -130,6 +160,8 @@ def tailor_snapshot(source, title, description):
     except AIProviderUnavailable:
         pass
     result["job_target"] = {"title": title, "description": description, "analysis": analysis, "method": method,
-                            "note": provider_note, "recommended_template_key": recommended_theme(title)}
-    result.setdefault("resume_meta", {})["section_order"] = ["profile", "skills", "experience", "projects", "education", "certifications", "achievements", "professional_links", "courses", "languages", "open_source_contributions"]
+                            "note": provider_note, "recommended_template_key": recommended_theme(title),
+                            "base_summary": base_bio, "generated_summary": (result.get("profile") or {}).get("bio", "")}
+    primary = sorted(("experience", "projects"), key=lambda section: max((relevance(item) for item in result.get(section, [])), default=0), reverse=True)
+    result.setdefault("resume_meta", {})["section_order"] = ["profile", *primary, "skills", "education", "certifications", "achievements", "professional_links", "courses", "languages", "open_source_contributions"]
     return result

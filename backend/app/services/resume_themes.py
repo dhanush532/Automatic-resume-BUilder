@@ -6,7 +6,7 @@ THEMES = {
     "ats_readable": {"name": "Technical ATS", "layout": "plain", "accent": "#202830", "font": "sans", "ats_safe": True, "description": "Linear, single-column reading order with standard headings and no decorative columns."},
     "professional": {"name": "Elegant Editorial", "layout": "editorial", "accent": "#3c3945", "font": "serif", "ats_safe": True, "description": "Serif masthead and hanging section labels in a generous editorial gutter."},
     "developer": {"name": "Contemporary Sidebar", "layout": "sidebar", "accent": "#1e3a5f", "font": "sans", "ats_safe": False, "description": "A quiet skills/education rail alongside a wider experience and project column."},
-    "creative": {"name": "Creative Modern", "layout": "balanced", "accent": "#75433d", "font": "sans", "ats_safe": False, "description": "Full-width ribbon masthead and balanced independent content columns."},
+    "creative": {"name": "Creative Modern", "layout": "balanced", "accent": "#75433d", "font": "sans", "ats_safe": False, "description": "Restrained ribbon masthead and warm section bars in a linear reading order."},
     "student": {"name": "Student Classic", "layout": "banded", "accent": "#315b43", "font": "sans", "ats_safe": True, "description": "The existing education-friendly option, retained for saved resumes."},
 }
 

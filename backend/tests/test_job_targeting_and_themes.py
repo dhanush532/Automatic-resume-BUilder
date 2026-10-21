@@ -124,7 +124,7 @@ def test_tailoring_of_imported_text_keeps_reading_order():
     assert "job_target" in result
     lines = result["imported_text"].splitlines()
     assert lines[0] == "Alex Morgan" and lines[1] == "alex@example.com"
-    assert "Built data pipelines serving 200 users." in lines
+    assert "Building data pipelines serving 200 users." in lines
     assert "200 users" in result["imported_text"]
 
 

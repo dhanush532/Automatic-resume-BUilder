@@ -9,9 +9,9 @@ from typing import Any
 import reportlab
 from reportlab.lib.colors import HexColor, white
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
-from reportlab.lib.utils import simpleSplit
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
@@ -33,7 +33,7 @@ FONT_DIRECTORY = Path(reportlab.__file__).parent / "fonts"
 pdfmetrics.registerFont(TTFont("ResumeSans", str(FONT_DIRECTORY / "Vera.ttf")))
 pdfmetrics.registerFont(TTFont("ResumeSansBold", str(FONT_DIRECTORY / "VeraBd.ttf")))
 
-PAGE_WIDTH, PAGE_HEIGHT = 595, 842
+PAGE_WIDTH, PAGE_HEIGHT = A4
 FAMILIES = {"sans": ("ResumeSans", "ResumeSansBold"), "serif": ("Times-Roman", "Times-Bold"), "mono": ("Courier", "Courier-Bold")}
 FONT_STACKS = {"sans": '"Helvetica Neue", Arial, sans-serif', "serif": 'Georgia, "Times New Roman", serif', "mono": 'ui-monospace, SFMono-Regular, Menlo, monospace'}
 HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -72,7 +72,25 @@ def _split_lines(value: Any) -> list[str]:
 
 
 def _dates(item: dict[str, Any]) -> str:
-    return " – ".join(part for part in (_display(item.get("start_date")), _display(item.get("end_date"))) if part)
+    def formatted(value):
+        text = _display(value)
+        match = re.fullmatch(r"(\d{4})-(\d{2})(?:-\d{2})?", text)
+        if match and 1 <= int(match[2]) <= 12:
+            return f"{('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec')[int(match[2]) - 1]} {match[1]}"
+        return text
+    return " – ".join(part for part in (formatted(item.get("start_date")), "Present" if item.get("is_current") else formatted(item.get("end_date"))) if part)
+
+
+def _unique_lines(lines):
+    seen = set()
+    result = []
+    for line in lines:
+        line = re.sub(r"^(?:[•▪*]+\s*|-\s+)", "", line.strip()).strip()
+        normalized = re.sub(r"\s+", " ", line).casefold()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            result.append(line)
+    return result
 
 
 def _section_entries(key: str, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -83,40 +101,61 @@ def _section_entries(key: str, records: list[dict[str, Any]]) -> list[dict[str, 
         for item in records:
             name, level = _display(item.get(name_field)), _display(item.get(level_field))
             lines.append(f"{name} — {level}" if name and level else name or level)
-        return [{"lead": None, "lines": lines}] if lines else []
+        return [{"lead": None, "lines": [" · ".join(_unique_lines(lines))], "dates": "", "details": [], "links": []}] if lines else []
     if key == "professional_links":
         lines = [f"{_display(item.get('label'))}: {_display(item.get('url'))}" for item in records]
-        return [{"lead": None, "lines": lines}] if lines else []
+        return [{"lead": None, "lines": _unique_lines(lines), "dates": "", "details": [], "links": []}] if lines else []
     for item in records:
+        dates = ""
+        details = []
+        links = []
         if key == "experience":
             lead = " · ".join(part for part in (_display(item.get("title")), _display(item.get("company"))) if part)
             dates = _dates(item)
-            lead = f"{lead} {dates}".strip() if lead and dates else lead or dates
-            lines = [line for field in ("description", "achievements", "technology_notes") for line in _split_lines(item.get(field))]
+            lines = [line for field in ("description", "achievements") for line in _split_lines(item.get(field))]
+            details = _split_lines(item.get("location"))
         elif key == "projects":
             lead = _display(item.get("name"))
-            lines = [line for field in ("description", "results", "technology_notes", "github_url", "live_url") for line in _split_lines(item.get(field))]
+            dates = _dates(item)
+            lines = [line for field in ("description", "features", "problem_solved", "results") for line in _split_lines(item.get(field))]
+            details = _split_lines(item.get("role"))
+            links = [item[field] for field in ("github_url", "live_url") if item.get(field)]
         elif key == "education":
             lead = " · ".join(part for part in (_display(item.get("degree")), _display(item.get("institution"))) if part)
             dates = _dates(item)
-            lines = ([dates] if dates else []) + _split_lines(item.get("description"))
+            lines = [line for field in ("field_of_study", "description", "achievements") for line in _split_lines(item.get(field))]
+            if item.get("grade"):
+                lines.append("Grade: " + _display(item["grade"]))
+            if item.get("coursework"):
+                lines.append("Coursework: " + _display(item["coursework"]))
         elif key == "certifications":
             lead = " · ".join(part for part in (_display(item.get("name")), _display(item.get("issuer"))) if part)
             dates = " · ".join(part for part in (_display(item.get("issue_date")), _display(item.get("expiry_date"))) if part)
-            lines = ([dates] if dates else []) + _split_lines(item.get("description"))
+            lines = _split_lines(item.get("description"))
+            if item.get("credential_id"):
+                details.append("Credential: " + _display(item["credential_id"]))
+            links = [item["credential_url"]] if item.get("credential_url") else []
         elif key == "courses":
             lead = " · ".join(part for part in (_display(item.get("name")), _display(item.get("provider"))) if part)
             done = _display(item.get("completion_date"))
-            lines = ([done] if done else []) + _split_lines(item.get("description"))
+            dates = done
+            lines = _split_lines(item.get("description"))
+            links = [item["credential_url"]] if item.get("credential_url") else []
         elif key == "achievements":
             lead = " · ".join(part for part in (_display(item.get("title")), _display(item.get("organization"))) if part)
             when = _display(item.get("achieved_on"))
-            lines = ([when] if when else []) + _split_lines(item.get("description"))
+            dates = when
+            lines = _split_lines(item.get("description"))
+            links = [item["evidence_url"]] if item.get("evidence_url") else []
         else:  # open_source_contributions
             lead = " · ".join(part for part in (_display(item.get("repository")), _display(item.get("contribution"))) if part)
-            lines = [line for field in ("technology_notes", "description") for line in _split_lines(item.get(field))]
+            dates = _dates(item)
+            lines = _split_lines(item.get("description"))
+            links = [item["url"]] if item.get("url") else []
+        if item.get("technology_notes"):
+            details.append("Technologies: " + _display(item["technology_notes"]))
         if lead or lines:
-            entries.append({"lead": lead or None, "lines": lines})
+            entries.append({"lead": lead or None, "lines": _unique_lines(lines), "dates": dates, "details": _unique_lines(details), "links": list(dict.fromkeys(links))})
     return entries
 
 
@@ -138,7 +177,7 @@ def resume_content(snapshot: dict[str, Any]) -> dict[str, Any]:
     bio = _split_lines(profile.get("bio")) if visible else []
     if bio:
         sections.append({"key": "summary", "label": "Summary", "entries": [{"lead": None, "lines": bio}]})
-    order = meta.get("section_order") or list(SECTION_LABELS)
+    order = list(dict.fromkeys(meta.get("section_order") or list(SECTION_LABELS)))
     for key in order:
         if key in hidden or key not in SECTION_LABELS:
             continue
@@ -211,8 +250,12 @@ def _section_html(section: dict[str, Any]) -> str:
         parts = []
         if entry["lead"]:
             parts.append(f'<p class="lead">{escape(entry["lead"])}</p>')
+        if entry.get("dates"):
+            parts.append(f'<p class="metadata">{escape(entry["dates"])}</p>')
         for line in entry["lines"]:
             parts.append(f'<p class="line{" bullet" if bullet else ""}">{escape(line)}</p>')
+        for line in entry.get("details", []) + entry.get("links", []):
+            parts.append(f'<p class="metadata">{escape(line)}</p>')
         entries.append(f'<div class="entry">{" ".join(parts)}</div>')
     return f'<section class="rsec" data-section="{escape(section["key"])}"><h2>{escape(section["label"])}</h2><div class="entries">{" ".join(entries)}</div></section>'
 
@@ -233,7 +276,7 @@ def _html_body(content: dict[str, Any], tokens: dict[str, Any]) -> str:
 CSS_TEMPLATE = """
 *{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
 body{margin:0;background:#eceee9;font-family:__FONT__;color:__INK__;font-size:10.5px;line-height:1.5}
-.sheet{background:#fff;max-width:840px;margin:20px auto;padding:__PAD__mm;box-shadow:0 12px 32px rgba(18,28,24,.14);min-height:1000px}
+.sheet{background:#fff;width:210mm;margin:20px auto;padding:__PAD__mm;box-shadow:0 12px 32px rgba(18,28,24,.14);min-height:297mm}
 h1,h2,p{margin:0;font-weight:inherit}h1,.lead,h2,.line.bullet:before{font-weight:700}
 .mast{padding-bottom:12px;margin-bottom:__SGAP__px}
 .mast h1{font-size:26px;line-height:1.15;letter-spacing:-.01em}
@@ -243,6 +286,7 @@ h1,h2,p{margin:0;font-weight:inherit}h1,.lead,h2,.line.bullet:before{font-weight
 .rsec h2{font-size:10.5px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:__ACCENT__;padding-bottom:4px;border-bottom:1px solid __HAIR__}
 .entries{margin-top:6px}
 .lead{font-size:11px;margin-top:7px}
+.metadata{font-size:9.5px;line-height:1.45;color:__MUTED__;margin-top:3px;overflow-wrap:anywhere}
 .line{margin-top:3px;font-size:10.3px;overflow-wrap:anywhere}
 .line.bullet{padding-left:13px;position:relative}
 .line.bullet:before{content:"\2022";position:absolute;left:0;top:0;color:__ACCENT__}
@@ -295,11 +339,12 @@ def _styles(tokens: dict[str, Any]) -> dict[str, ParagraphStyle]:
     space_after = 2.5 if compact else 3.5
     sgap = 9 if compact else 16
     body = ParagraphStyle("rbody", fontName=regular, fontSize=body_size, leading=body_lead, textColor=ink, spaceAfter=space_after,
-                          alignment=TA_LEFT, splitLongWords=True, bulletFontName=regular, bulletFontSize=body_size, bulletColor=accent)
+                          alignment=TA_LEFT, splitLongWords=True, allowWidows=0, allowOrphans=0, bulletFontName="ResumeSans", bulletFontSize=body_size, bulletColor=accent)
     return {
         "body": body,
         "bullet": ParagraphStyle("rbullet", parent=body, leftIndent=13, bulletIndent=2),
-        "lead": ParagraphStyle("rlead", parent=body, fontName=bold, fontSize=body_size + 0.4, leading=body_lead + 1.5, spaceBefore=5, spaceAfter=1.5),
+        "lead": ParagraphStyle("rlead", parent=body, fontName=bold, fontSize=body_size + 0.4, leading=body_lead + 1.5, spaceBefore=7, spaceAfter=3, keepWithNext=1),
+        "metadata": ParagraphStyle("rmeta", parent=body, fontSize=9, leading=12.5, textColor=muted, spaceAfter=4),
         "sgap": sgap,
         "name": ParagraphStyle("rname", parent=body, fontName=bold, fontSize=21, leading=25, spaceAfter=3),
         "name_center": ParagraphStyle("rnamec", parent=body, fontName=bold, fontSize=23, leading=27, spaceAfter=4, alignment=TA_CENTER),
@@ -356,7 +401,7 @@ def _mast_flow(content: dict[str, Any], tokens: dict[str, Any], styles: dict[str
         if contact:
             if headline:
                 info.append(Spacer(1, 4))
-            info.append(Paragraph(escape(contact), styles["band_contact"]))
+            info.append(Paragraph(_linked_text(contact), styles["band_contact"]))
         if info:
             out.append(_band(info, tint, width, (6, 12, 9)))
         return out
@@ -370,7 +415,7 @@ def _mast_flow(content: dict[str, Any], tokens: dict[str, Any], styles: dict[str
             cells.append(Paragraph(escape(headline), styles["ribbon_headline"]))
         out = [_band(cells, accent, width, (15, 18, 15))] if cells else []
         if contact:
-            out.append(Paragraph(escape(contact), styles["contact_accent"]))
+            out.append(Paragraph(_linked_text(contact), styles["contact_accent"]))
         return out
     centered = layout == "centered"
     out = []
@@ -379,7 +424,7 @@ def _mast_flow(content: dict[str, Any], tokens: dict[str, Any], styles: dict[str
     if headline:
         out.append(Paragraph(escape(headline), styles["sub_center"] if centered else styles["sub"]))
     if contact:
-        out.append(Paragraph(escape(contact), styles["contact_center"] if centered else styles["contact"]))
+        out.append(Paragraph(_linked_text(contact), styles["contact_center"] if centered else styles["contact"]))
     rule = HRFlowable(thickness=0.9 if layout in {"centered", "plain"} else 0.6, color=ink if layout in {"centered", "plain"} else styles["hair"], spaceBefore=8, spaceAfter=0)
     rule.keepWithNext = 1
     out.append(rule)
@@ -403,22 +448,88 @@ def _section_flow(content: dict[str, Any], tokens: dict[str, Any], styles: dict[
             rule = HRFlowable(thickness=0.8 if layout == "plain" else 0.5, color=styles["ink"] if layout == "plain" else styles["hair"], spaceBefore=1, spaceAfter=4)
             rule.keepWithNext = 1
             out.append(rule)
-        bullet = section["key"] in BULLET_SECTIONS and layout != "plain"
-        line_style = styles["bullet"] if bullet else styles["body"]
         for entry in section["entries"]:
-            if entry["lead"]:
-                out.append(Paragraph(escape(entry["lead"]), styles["lead"]))
-            for line in entry["lines"]:
-                if bullet:
-                    out.append(Paragraph(escape(line), line_style, bulletText="•"))
-                else:
-                    out.append(Paragraph(escape(line), line_style))
+            out.extend(_entry_flow(entry, section["key"], styles, width))
     return out
+
+
+def _linked_text(text: str) -> str:
+    """Escape user input first, adding only validated HTTP(S) link annotations."""
+    parts = []
+    start = 0
+    for match in re.finditer(r"https?://[^\s<>]+", text):
+        parts.append(escape(text[start:match.start()]))
+        url = escape(match[0], quote=True)
+        parts.append(f'<link href="{url}">{url}</link>')
+        start = match.end()
+    parts.append(escape(text[start:]))
+    return "".join(parts)
+
+
+class _BulletParagraph(Paragraph):
+    """Keep ordinary bullets whole without nesting KeepTogether flowables.
+
+    Nested keep groups hide their real height from a preceding section heading.
+    Over-page bullets must still be splittable to avoid a LayoutError.
+    """
+
+    def split(self, availWidth, availHeight):
+        if self.height <= 240:
+            return []
+        return super().split(availWidth, availHeight)
+
+
+def _entry_flow(entry, key, styles, width):
+    out = []
+    if entry["lead"]:
+        # Dates occupy their own line: even an exceptionally long title cannot collide.
+        out.append(Paragraph(escape(entry["lead"]), styles["lead"]))
+    if entry.get("dates"):
+        date = Paragraph(escape(entry["dates"]), styles["metadata"])
+        date.keepWithNext = bool(entry["lines"] or entry.get("details"))
+        out.append(date)
+    for line in entry["lines"]:
+        bullet = key in BULLET_SECTIONS
+        paragraph_type = _BulletParagraph if bullet else Paragraph
+        out.append(paragraph_type(_linked_text(line), styles["bullet"] if bullet else styles["body"], bulletText="•" if bullet else None))
+    details = entry.get("details", []) + entry.get("links", [])
+    if out and details:
+        out[-1].keepWithNext = 1
+    for line in details:
+        paragraph = Paragraph(_linked_text(line), styles["metadata"])
+        paragraph.keepWithNext = 1
+        out.append(paragraph)
+    if out:
+        out[-1].keepWithNext = 0
+        if key not in BULLET_SECTIONS and entry["lead"]:
+            height = sum(item.wrap(width - 12, PAGE_HEIGHT)[1] + item.getSpaceAfter() for item in out)
+            if height <= 160:
+                for item in out[:-1]:
+                    item.keepWithNext = 1
+    return out
+
+
+def _page_footer(canvas, doc):
+    canvas.saveState()
+    canvas.setFont("ResumeSans", 8)
+    canvas.setFillColor(HexColor(MUTED))
+    canvas.drawRightString(PAGE_WIDTH - doc.rightMargin, doc.bottomMargin - 17, str(doc.page))
+    canvas.restoreState()
+
+
+class _ResumeDocTemplate(SimpleDocTemplate):
+    def afterPage(self):
+        _page_footer(self.canv, self)
+
+
+class _SidebarDocTemplate(BaseDocTemplate):
+    def afterPage(self):
+        _page_footer(self.canv, self)
 
 
 def _simple_doc(output: BytesIO, tokens: dict[str, Any]) -> SimpleDocTemplate:
     margin = tokens["margin_mm"] * mm
-    return SimpleDocTemplate(output, pagesize=(PAGE_WIDTH, PAGE_HEIGHT), leftMargin=margin, rightMargin=margin,
+    return _ResumeDocTemplate(output, pagesize=(PAGE_WIDTH, PAGE_HEIGHT), leftMargin=margin, rightMargin=margin,
                              topMargin=margin, bottomMargin=margin, pageCompression=0, invariant=1,
                              title="Resume", author="", creator="CareerPilot")
 
@@ -448,36 +559,24 @@ def _pdf_editorial(output: BytesIO, content: dict[str, Any], tokens: dict[str, A
     styles = _styles(tokens)
     story = _mast_flow(content, tokens, styles, width)
     gutter = 88
-    rows: list[list[Any]] = []
-    paddings: list[tuple[int, int]] = []
-    sgap = styles["sgap"]
+    # One splittable row per flowable, rather than a whole-document Table chained
+    # to the masthead rule (which pushed the entire body off page one).
     for section in content["sections"]:
-        items: list[tuple[str, Any]] = []
+        first = True
+        story.append(Spacer(1, styles["sgap"]))
         for entry in section["entries"]:
-            if entry["lead"]:
-                items.append(("lead", Paragraph(escape(entry["lead"]), styles["lead"])))
-            bullet = section["key"] in BULLET_SECTIONS
-            line_style = styles["bullet"] if bullet else styles["body"]
-            for line in entry["lines"]:
-                items.append(("line", Paragraph(escape(line), line_style, bulletText="•") if bullet else Paragraph(escape(line), line_style)))
-        for index, (kind, item) in enumerate(items):
-            label = Paragraph(escape(section["label"].upper()), styles["gutter_label"]) if index == 0 else ""
-            rows.append([label, item])
-            top = sgap if index == 0 else 0
-            bottom = 6 if kind == "lead" else 3
-            paddings.append((top, bottom))
-    if rows:
-        table = Table(rows, colWidths=[gutter, width - gutter])
-        commands: list[tuple] = [("VALIGN", (0, 0), (-1, -1), "TOP"),
+            for item in _entry_flow(entry, section["key"], styles, width - gutter - 16):
+                label = Paragraph(escape(section["label"].upper()), styles["gutter_label"]) if first else ""
+                table = Table([[label, item]], colWidths=[gutter, width - gutter], splitByRow=1, splitInRow=1)
+                table.keepWithNext = item.getKeepWithNext()
+                table.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"),
                                  ("LEFTPADDING", (0, 0), (0, -1), 0), ("RIGHTPADDING", (0, 0), (0, -1), 10),
                                  ("LEFTPADDING", (1, 0), (1, -1), 16), ("RIGHTPADDING", (1, 0), (1, -1), 0),
-                                 ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-                                 ("LINEBEFORE", (1, 0), (1, -1), 0.7, styles["hair"])]
-        for index, (top, bottom) in enumerate(paddings):
-            commands.append(("TOPPADDING", (0, index), (-1, index), top))
-            commands.append(("BOTTOMPADDING", (0, index), (-1, index), bottom))
-        table.setStyle(TableStyle(commands))
-        story.append(table)
+                                 ("TOPPADDING", (0, 0), (-1, -1), 5 if item.style.name == "rlead" else 0),
+                                 ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                                 ("LINEBEFORE", (1, 0), (1, -1), 0.7, styles["hair"])]))
+                story.append(table)
+                first = False
     doc.build(story or [Paragraph("Resume", styles["body"])])
 
 
@@ -498,126 +597,103 @@ def _pdf_sidebar(output: BytesIO, content: dict[str, Any], tokens: dict[str, Any
     tint = HexColor(tokens["tint"])
     muted = HexColor(MUTED)
     header = content["header"]
-    name_lines = simpleSplit(header["name"], bold, 21, avail_w) if header["name"] else []
-    head_lines = simpleSplit(header["headline"], regular, 11.5, avail_w) if header["headline"] else []
-    baseline = PAGE_HEIGHT - top - 16
-    baseline -= 25 * len(name_lines)
-    if head_lines:
-        baseline -= (2 if name_lines else 0) + 15 * len(head_lines)
-    if name_lines or head_lines:
-        rule_y = baseline - 5
-        frame_top = rule_y - 7
-        mast_top = PAGE_HEIGHT - top - 16
-    else:
-        rule_y = None
-        frame_top = PAGE_HEIGHT - top
-        mast_top = None
+    mast = [Paragraph(escape(header[field]), styles[style]) for field, style in (("name", "name"), ("headline", "sub")) if header[field]]
+    mast_height = sum(item.wrap(avail_w, PAGE_HEIGHT)[1] + item.getSpaceAfter() for item in mast)
+    rule_y = PAGE_HEIGHT - top - mast_height - 8
+    frame_top = rule_y - 12 if mast else PAGE_HEIGHT - top
 
     rail_pad = 8
     rail_text_w = rail_w - 2 * rail_pad
-    font_map = {"label": (bold, 8, 11), "lead": (bold, 8.5, 11.5), "line": (regular, 8.5, 11.5), "contact": (regular, 8.5, 11.5)}
-    blocks: list[tuple[str, str]] = [("contact", value) for value in header["contact"]]
+    font_map = {"label": (bold, 9, 12), "lead": (bold, 9, 12.5), "line": (regular, 9, 12.5), "contact": (regular, 9, 12.5)}
+    def rail_paragraph(kind, text):
+        font, size, leading = font_map[kind]
+        style = ParagraphStyle("rail_" + kind, fontName=font, fontSize=size, leading=leading, splitLongWords=True,
+                               textColor=accent if kind == "label" else muted if kind == "contact" else ink)
+        return Paragraph(_linked_text(text), style)
+
+    budget = frame_top - bottom - 22
+    rail_blocks = []
+    rail_keys = set()
+    overflow_contact = []
+
+    def pack(blocks):
+        paragraphs = [rail_paragraph(kind, text) for kind, text in blocks]
+        return [(paragraph, paragraph.wrap(rail_text_w, PAGE_HEIGHT)[1] + 3) for paragraph in paragraphs]
+
+    contacts = pack([("contact", value) for value in header["contact"]])
+    if sum(height for _, height in contacts) <= budget:
+        rail_blocks.extend(contacts)
+    else:
+        overflow_contact = [{"key": "professional_links", "label": "Contact", "entries": [{"lead": None, "lines": header["contact"]}]}]
+    used = sum(height for _, height in rail_blocks)
     for section in content["sections"]:
         if section["key"] not in RAIL_SECTIONS:
             continue
-        blocks.append(("gap", ""))
-        blocks.append(("label", section["label"].upper()))
+        blocks = [("label", section["label"].upper())]
         for entry in section["entries"]:
             if entry["lead"]:
                 blocks.append(("lead", entry["lead"]))
-            blocks.extend(("line", line) for line in entry["lines"])
-
-    def measure(kind: str, text: str) -> float:
-        if kind == "gap":
-            return 10.0
-        font, size, leading = font_map[kind]
-        extra = 3 if kind == "label" else (2 if kind == "lead" else 0)
-        return len(simpleSplit(text, font, size, rail_text_w)) * leading + extra
-
-    rail_pages: list[list[tuple[str, str, float]]] = [[]]
-    used = 0.0
-    budget = frame_top - bottom - 10
-    for kind, text in blocks:
-        height = measure(kind, text)
-        if rail_pages[-1] and used + height > budget:
-            rail_pages.append([])
-            used = 0.0
-            budget = avail_h - 10
-        rail_pages[-1].append((kind, text, height))
-        used += height
+            if entry.get("dates"):
+                blocks.append(("line", entry["dates"]))
+            blocks.extend(("line", line) for line in entry["lines"] + entry.get("details", []) + entry.get("links", []))
+        section_blocks = pack(blocks)
+        height = sum(height for _, height in section_blocks) + 9
+        if used + height <= budget:
+            rail_blocks.extend([(None, 9), *section_blocks])
+            used += height
+            rail_keys.add(section["key"])
+        # A section that cannot fit in the rail stays whole in the main flow.
+        # Continuation pages then use the full width instead of empty main columns.
 
     def draw_mast(canvas) -> None:
-        if not (name_lines or head_lines):
+        if not mast:
             return
-        cursor = mast_top
-        canvas.setFillColor(ink)
-        canvas.setFont(bold, 21)
-        for line in name_lines:
-            canvas.drawString(left, cursor, line)
-            cursor -= 25
-        if head_lines:
-            cursor -= 2 if name_lines else 0
-            canvas.setFillColor(accent)
-            canvas.setFont(regular, 11.5)
-            for line in head_lines:
-                canvas.drawString(left, cursor, line)
-                cursor -= 15
+        cursor = PAGE_HEIGHT - top
+        for paragraph in mast:
+            height = paragraph.wrap(avail_w, PAGE_HEIGHT)[1]
+            cursor -= height
+            paragraph.drawOn(canvas, left, cursor)
+            cursor -= paragraph.getSpaceAfter()
         canvas.setStrokeColor(hair)
         canvas.setLineWidth(0.9)
         canvas.line(left, rule_y, left + avail_w, rule_y)
 
-    def draw_rail(canvas, page_index: int) -> None:
-        page_blocks = rail_pages[min(page_index, len(rail_pages) - 1)]
-        if not page_blocks:
+    def draw_rail(canvas) -> None:
+        if not rail_blocks:
             return
-        start_y = (frame_top - 6) if page_index == 0 else (PAGE_HEIGHT - top - 6)
-        total = sum(height for _, _, height in page_blocks)
+        start_y = frame_top - 6
+        total = sum(height for _, height in rail_blocks)
         rect_bottom = start_y - total - 8
         canvas.setFillColor(tint)
         canvas.rect(left, rect_bottom, rail_w, start_y - rect_bottom, stroke=0, fill=1)
         cursor = start_y - 8
-        for kind, text, _ in page_blocks:
-            if kind == "gap":
-                cursor -= 10
-                continue
-            font, size, leading = font_map[kind]
-            canvas.setFont(font, size)
-            canvas.setFillColor(accent if kind == "label" else muted if kind == "contact" else ink)
-            for line in simpleSplit(text, font, size, rail_text_w):
-                cursor -= leading
-                canvas.drawString(left + rail_pad, cursor, line)
-            if kind == "label":
-                cursor -= 3
-            elif kind == "lead":
-                cursor -= 2
+        for paragraph, height in rail_blocks:
+            cursor -= height
+            if paragraph is not None:
+                paragraph.wrap(rail_text_w, height)
+                paragraph.drawOn(canvas, left + rail_pad, cursor + 3)
 
     def on_first(canvas, doc) -> None:
         draw_mast(canvas)
-        draw_rail(canvas, 0)
+        draw_rail(canvas)
 
     padding = dict(topPadding=0, bottomPadding=0, leftPadding=0, rightPadding=0)
+    if not rail_blocks:
+        main_x, main_w = left, avail_w
     frame_page1 = Frame(main_x, bottom, main_w, frame_top - bottom, id="main1", **padding)
-    if len(rail_pages) > 1:
-        templates = [
-            PageTemplate(id="first", frames=[frame_page1], onPage=on_first),
-            PageTemplate(id="more", frames=[Frame(main_x, bottom, main_w, avail_h, id="more", **padding)],
-                         onPage=lambda canvas, doc: draw_rail(canvas, doc.page - 1)),
-        ]
-        next_template = "more"
-    else:
-        templates = [
-            PageTemplate(id="first", frames=[frame_page1], onPage=on_first),
-            PageTemplate(id="wide", frames=[Frame(left, bottom, avail_w, avail_h, id="wide", **padding)]),
-        ]
-        next_template = "wide"
-    doc = BaseDocTemplate(output, pagesize=(PAGE_WIDTH, PAGE_HEIGHT), leftMargin=left, rightMargin=left,
+    templates = [
+        PageTemplate(id="first", frames=[frame_page1], onPage=on_first),
+        PageTemplate(id="wide", frames=[Frame(left, bottom, avail_w, avail_h, id="wide", **padding)]),
+    ]
+    doc = _SidebarDocTemplate(output, pagesize=(PAGE_WIDTH, PAGE_HEIGHT), leftMargin=left, rightMargin=left,
                           topMargin=top, bottomMargin=bottom, pageCompression=0, invariant=1,
                           title="Resume", author="", creator="CareerPilot")
     doc.addPageTemplates(templates)
     main_styles = dict(styles)
     main_styles["label"] = ParagraphStyle("rside", parent=styles["label"], spaceBefore=styles["sgap"])
-    story: list = [NextPageTemplate(next_template)]
-    story += _section_flow(content, tokens, main_styles, main_w)
+    story: list = [NextPageTemplate("wide")]
+    main_content = {**content, "sections": overflow_contact + [section for section in content["sections"] if section["key"] not in rail_keys]}
+    story += _section_flow(main_content, tokens, main_styles, main_w)
     if len(story) == 1:
         story.append(Spacer(1, 2))
     doc.build(story)
