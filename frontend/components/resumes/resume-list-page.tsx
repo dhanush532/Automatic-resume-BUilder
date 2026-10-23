@@ -2,12 +2,16 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { gsap } from "gsap";
+import { useGSAP } from "@gsap/react";
 import { ArrowUpRight, Copy, FilePlus2, FileText, Upload, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ApiError, apiRequest } from "@/lib/api";
+
+gsap.registerPlugin(useGSAP);
 
 export type ResumeTemplate = { id: string; name: string; slug: string; description: string; template_key: string; is_active: boolean; display_name?: string | null; layout?: string | null; ats_safe?: boolean; recommended?: boolean };
 export type ResumeVersion = { id: string; resume_id: string; version_number: number; source: string; content_snapshot: Record<string, unknown>; template_id: string; created_at: string; restored_from_version_id: string | null; change_summary: string | null };
@@ -67,18 +71,30 @@ export function ResumeNewPage() {
     return () => { clearTimeout(timer); controller.abort(); };
   }, [role]);
   const targeted = role.trim().length >= 2 && jobDescription.trim().length >= 20;
+  const incompleteTarget = !!(role.trim() || jobDescription.trim()) && !targeted;
   async function create() {
+    if (incompleteTarget) { setError("Complete both the target title and job description, or clear both to create a master resume."); return; }
     setSaving(true); setError("");
     try { const resume = await apiRequest<Resume>("/resumes", { method: "POST", body: JSON.stringify({ name, template_id: templateId, type: targeted ? "job_specific" : "master", ...(targeted ? { target_job_title: role.trim(), job_description: jobDescription.trim() } : {}) }) }); router.push(`/resumes/${resume.id}`); }
     catch (caught) { setError(caught instanceof Error ? caught.message : "Could not create this resume."); }
     finally { setSaving(false); }
   }
   return <ResumeShell title="A fresh take on your experience." description="Create a resume from the information already in your career profile. Add a target job and we will draft a job-specific version from your own evidence."><div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5 text-sm leading-7 text-emerald-900">Already have a resume? <Link href="/review" className="font-semibold underline">Import it instead</Link> and skip the profile forms. Starting from scratch? <Link href="/passport" className="font-semibold underline">Add your career details</Link> first.</div>{error && <Notice>{error}</Notice>}<Card className="mt-6 p-6 sm:p-8"><label className="block max-w-md text-sm font-medium">Resume name<Input className="mt-2" maxLength={160} value={name} onChange={event => setName(event.target.value)} /></label><fieldset className="mt-7"><legend className="text-sm font-semibold">Choose a theme</legend>{loading ? <p className="mt-4 text-sm text-muted">Loading themes…</p> : <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{templates.map(template => <label className={`cursor-pointer rounded-xl border p-5 ${template.id === templateId ? "border-brand bg-indigo-50/40 ring-1 ring-brand" : "hover:border-slate-400"}`} key={template.id}><span className="flex flex-wrap items-center gap-2"><input className="mr-1 accent-brand" type="radio" name="template" value={template.id} checked={templateId === template.id} onChange={() => setTemplateId(template.id)} /><span className="text-sm font-semibold">{template.display_name ?? template.name}</span>{template.recommended && <span className="rounded-full bg-brand px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">Recommended</span>}{template.ats_safe && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-800">ATS-safe</span>}</span><span className="mt-3 block text-xs leading-6 text-muted">{template.description}</span></label>)}</div>}</fieldset>
-    <div className="mt-7 rounded-xl border border-line bg-white p-5"><h2 className="text-sm font-semibold">Target a job (optional)</h2><p className="mt-1 text-xs leading-5 text-muted">We create a separate job-specific draft that reorders and tightens only evidence already in your profile. Nothing is invented, and your master resume stays untouched.</p><label className="mt-4 block max-w-md text-sm font-medium">Target job title<Input className="mt-2" maxLength={120} placeholder="e.g. Senior Platform Engineer" value={role} onChange={event => setRole(event.target.value)} /></label><label className="mt-4 block text-sm font-medium">Job description<textarea className="mt-2 min-h-[140px] w-full rounded-lg border p-3 text-sm leading-6" maxLength={30000} placeholder="Paste the role requirements so we can surface matched skills and anything missing from your profile." value={jobDescription} onChange={event => setJobDescription(event.target.value)} /></label>{(role.trim() || jobDescription.trim()) && !targeted && <p className="mt-2 text-xs text-amber-800">Add both a title and at least 20 characters of job description to create a job-specific draft; otherwise we create a master resume.</p>}</div>
-    <Button className="mt-7" onClick={() => void create()} disabled={loading || saving || !templateId || !name.trim()}>{saving ? "Creating your draft…" : targeted ? "Create job-specific draft" : "Create my resume"}<ArrowUpRight size={16} /></Button></Card></ResumeShell>;
+    <div className="mt-7 rounded-xl border border-line bg-white p-5"><h2 className="text-sm font-semibold">Target a job (optional)</h2><p className="mt-1 text-xs leading-5 text-muted">We create a separate job-specific draft that reorders and tightens only evidence already in your profile. Nothing is invented, and your master resume stays untouched.</p><label className="mt-4 block max-w-md text-sm font-medium">Target job title<Input className="mt-2" maxLength={120} placeholder="e.g. Senior Platform Engineer" value={role} onChange={event => setRole(event.target.value)} /></label><label className="mt-4 block text-sm font-medium">Job description<textarea className="mt-2 min-h-[140px] w-full rounded-lg border p-3 text-sm leading-6" maxLength={30000} placeholder="Paste the role requirements so we can surface matched skills and anything missing from your profile." value={jobDescription} onChange={event => setJobDescription(event.target.value)} /></label>{incompleteTarget && <p className="mt-2 text-xs text-amber-800">Use a title of at least 2 characters and a job description of at least 20 characters.</p>}</div>
+    {incompleteTarget && <p className="mt-4 text-sm text-amber-800" role="status">Complete both job fields or clear them to continue. Your target will not be silently discarded.</p>}
+    <Button className="mt-7" onClick={() => void create()} disabled={loading || saving || !templateId || !name.trim() || incompleteTarget}>{saving ? "Creating your draft…" : targeted ? "Create job-specific draft" : "Create my resume"}<ArrowUpRight size={16} /></Button></Card></ResumeShell>;
 }
 
 export function ResumeShell({ title, description, children }: { title: string; description: string; children: ReactNode }) {
-  return <main className="min-h-screen bg-[#f8f9f5] px-5 py-8 sm:px-8 sm:py-12 lg:px-12"><div className="mx-auto max-w-6xl"><header className="border-b border-[#dce3d5] pb-8"><p className="text-[10px] font-semibold uppercase tracking-[.16em] text-emerald-800">Your resume workspace</p><h1 className="mt-4 text-3xl font-semibold tracking-[-.05em] text-[#173c32] sm:text-4xl">{title}</h1><p className="mt-4 max-w-2xl text-sm leading-7 text-muted">{description}</p></header><div className="mt-7">{children}</div></div></main>;
+  const root = useRef<HTMLElement>(null);
+  useGSAP(() => {
+    const media = gsap.matchMedia();
+    media.add("(prefers-reduced-motion: no-preference)", () => {
+      gsap.from(".resume-workspace-heading > *", { y: 12, opacity: 0, duration: .5, stagger: .06, ease: "power2.out" });
+      gsap.from(".resume-workspace-body", { y: 16, opacity: 0, duration: .55, delay: .12, ease: "power2.out" });
+    });
+    return () => media.revert();
+  }, { scope: root, dependencies: [title], revertOnUpdate: true });
+  return <main ref={root} className="resume-workspace min-h-[100dvh] px-5 py-8 sm:px-8 sm:py-12 lg:px-12"><div className="mx-auto max-w-7xl"><header className="resume-workspace-heading"><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-emerald-800">CareerPilot / Resume studio</p><h1 className="mt-4 text-3xl font-semibold tracking-[-.05em] text-[#173c32] sm:text-4xl">{title}</h1><p className="mt-4 max-w-2xl text-sm leading-7 text-muted">{description}</p><div className="mt-5 flex flex-wrap gap-2 text-[11px] font-medium text-emerald-900"><span className="rounded-full border bg-white px-3 py-1.5">Your experience, well presented</span><span className="rounded-full border bg-white px-3 py-1.5">A4 · Searchable PDF</span></div></header><div className="resume-workspace-body mt-7">{children}</div></div></main>;
 }
 function Notice({ children }: { children: ReactNode }) { return <p className="mt-5 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800" role="alert">{children}</p>; }

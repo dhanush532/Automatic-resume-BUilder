@@ -263,6 +263,8 @@ def _section_html(section: dict[str, Any]) -> str:
             parts.append(f'<p class="lead">{escape(entry["lead"])}</p>')
         if entry.get("dates"):
             parts.append(f'<p class="metadata">{escape(entry["dates"])}</p>')
+        for line in entry.get("pre_details", []):
+            parts.append(f'<p class="metadata">{escape(line)}</p>')
         for line in entry["lines"]:
             parts.append(f'<p class="line{" bullet" if bullet else ""}">{escape(line)}</p>')
         for line in entry.get("details", []) + entry.get("links", []):
@@ -487,10 +489,11 @@ def _linked_text(text: str) -> str:
     """Escape user input first, adding only validated HTTP(S) link annotations."""
     parts = []
     start = 0
-    for match in re.finditer(r"https?://[^\s<>]+", text):
+    for match in re.finditer(r"https?://[^\s<>]+|(?:www\.)?(?:linkedin|github)\.com/[^\s<>]+", text):
         parts.append(escape(text[start:match.start()]))
-        url = escape(match[0], quote=True)
-        parts.append(f'<link href="{url}">{url}</link>')
+        label = escape(match[0], quote=True)
+        url = label if match[0].startswith(("http://", "https://")) else "https://" + label
+        parts.append(f'<link href="{url}">{label}</link>')
         start = match.end()
     parts.append(escape(text[start:]))
     return "".join(parts)
@@ -518,6 +521,10 @@ def _entry_flow(entry, key, styles, width):
         date = Paragraph(escape(entry["dates"]), styles["metadata"])
         date.keepWithNext = bool(entry["lines"] or entry.get("details"))
         out.append(date)
+    for line in entry.get("pre_details", []):
+        metadata = Paragraph(_linked_text(line), styles["metadata"])
+        metadata.keepWithNext = 1
+        out.append(metadata)
     for line in entry["lines"]:
         bullet = key in BULLET_SECTIONS
         paragraph_type = _BulletParagraph if bullet else Paragraph
@@ -531,6 +538,11 @@ def _entry_flow(entry, key, styles, width):
         out.append(paragraph)
     if out:
         out[-1].keepWithNext = 0
+        if entry.get("keep_compact"):
+            height = sum(item.wrap(width - 12, PAGE_HEIGHT)[1] + item.getSpaceBefore() + item.getSpaceAfter() for item in out)
+            if height <= 240:
+                for item in out[:-1]:
+                    item.keepWithNext = 1
         if key not in BULLET_SECTIONS and entry["lead"]:
             height = sum(item.wrap(width - 12, PAGE_HEIGHT)[1] + item.getSpaceAfter() for item in out)
             if height <= 160:
@@ -665,7 +677,7 @@ def _pdf_sidebar(output: BytesIO, content: dict[str, Any], tokens: dict[str, Any
                 blocks.append(("lead", entry["lead"]))
             if entry.get("dates"):
                 blocks.append(("line", entry["dates"]))
-            blocks.extend(("line", line) for line in entry["lines"] + entry.get("details", []) + entry.get("links", []))
+            blocks.extend(("line", line) for line in entry.get("pre_details", []) + entry["lines"] + entry.get("details", []) + entry.get("links", []))
         section_blocks = pack(blocks)
         height = sum(height for _, height in section_blocks) + 9
         if used + height <= budget:

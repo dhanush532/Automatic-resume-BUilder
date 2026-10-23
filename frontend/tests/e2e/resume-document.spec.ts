@@ -15,7 +15,7 @@ test.beforeAll(() => {
   pdf = execFileSync("uv", ["run", "python", "-c", "import sys,base64; sys.path.insert(0,'tests'); from resume_quality_fixture import quality_snapshot; from app.services.pdf import render_pdf; print(base64.b64encode(render_pdf(quality_snapshot(False),'ats_readable')).decode())"], { cwd: resolve(process.cwd(), "../backend"), encoding: "utf8" }).trim();
 });
 
-test("editor previews actual PDF bytes and preserves content while changing presentation", async ({ page }) => {
+test("editor previews actual PDF bytes and preserves content while changing presentation", async ({ page }, info) => {
   const previews: { template_id: string; include_pdf: boolean; ats_safe?: boolean; edits: { summary_override?: string; design?: { font: string } } }[] = [];
   await page.route("**/api/v1/resumes/**", async route => {
     const path = new URL(route.request().url()).pathname;
@@ -27,11 +27,12 @@ test("editor previews actual PDF bytes and preserves content while changing pres
     return route.fulfill({ headers: cors, json: { id, name: "Document QA", template_id: templates[0].id, template: templates[0], latest_version: { id: "version-one", version_number: 1, content_snapshot: { profile: { headline: "Engineering student", bio: "Original evidence summary." }, resume_meta: {} } } } });
   });
   await page.goto(`/resumes/${id}`);
-  const frame = page.getByTitle("Live resume preview", { exact: true });
-  await expect(frame).toHaveAttribute("src", /^blob:/);
-  await expect(frame).not.toHaveAttribute("srcdoc");
+  const frame = page.getByRole("region", { name: "Live resume preview", exact: true });
+  await expect(frame).toHaveAttribute("data-pdf-url", /^blob:/);
+  await expect(frame.locator('canvas[data-rendered="true"]').first()).toBeVisible({ timeout: 20000 });
+  await expect(frame.locator(".textLayer")).toContainText(["Alex Morgan"]);
   const actualBytes = await page.evaluate(async () => {
-    const src = document.querySelector<HTMLIFrameElement>('iframe[title="Live resume preview"]')!.src;
+    const src = document.querySelector<HTMLElement>('[aria-label="Live resume preview"]')!.dataset.pdfUrl!;
     const bytes = new Uint8Array(await (await fetch(src.split("#")[0])).arrayBuffer());
     return btoa(Array.from(bytes, byte => String.fromCharCode(byte)).join(""));
   });
@@ -41,12 +42,35 @@ test("editor previews actual PDF bytes and preserves content while changing pres
   await page.getByRole("combobox", { name: "Typeface", exact: true }).selectOption("serif");
   await expect.poll(() => previews.some(item => item.template_id === "theme-two" && item.edits.summary_override === "Edited and verified evidence summary." && item.edits.design?.font === "serif" && item.include_pdf)).toBe(true);
   await expect(page.getByRole("textbox", { name: "Summary", exact: true })).toHaveValue("Edited and verified evidence summary.");
+  await page.getByRole("textbox", { name: "Target job title", exact: true }).fill("Backend intern");
+  await page.getByRole("textbox", { name: "Job description", exact: true }).fill("Build Python services with PostgreSQL integration tests.");
+  await expect(page.getByText("Save your content changes before tailoring.", { exact: false })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create job-specific draft", exact: true })).toBeDisabled();
   const download = page.getByRole("link", { name: "Download PDF", exact: true });
   await expect(download).toHaveAttribute("href", /^blob:/);
+  await expect(frame).toHaveAttribute("aria-busy", "false", { timeout: 20000 });
   const event = page.waitForEvent("download");
   await download.click();
   expect((await event).suggestedFilename()).toBe("resume.pdf");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.locator(".resume-workspace-heading").scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `test-results/resume-studio-${info.project.name}.png`, fullPage: true });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(page.locator(".resume-workspace-body")).toHaveCSS("opacity", "1");
+  await expect(page.locator(".resume-workspace-body")).toHaveCSS("transform", "none");
+});
+
+test("incomplete job targeting cannot silently create a master resume", async ({ page }) => {
+  let creates = 0;
+  await page.route("**/api/v1/resumes/templates**", route => route.fulfill({ headers: cors, json: templates }));
+  await page.route("**/api/v1/resumes", async route => { creates++; await route.fulfill({ headers: cors, json: { id } }); });
+  await page.goto("/resumes/new");
+  await page.getByRole("textbox", { name: "Target job title", exact: true }).fill("Backend intern");
+  await expect(page.getByRole("button", { name: "Create my resume", exact: true })).toBeDisabled();
+  await expect(page.getByText("Your target will not be silently discarded.", { exact: false })).toBeVisible();
+  expect(creates).toBe(0);
+  await page.getByRole("textbox", { name: "Job description", exact: true }).fill("Build verified Python services and test PostgreSQL integrations.");
+  await expect(page.getByRole("button", { name: "Create job-specific draft", exact: true })).toBeEnabled();
 });
 
 test("preview failures are visible and cannot download an out-of-date draft", async ({ page }) => {

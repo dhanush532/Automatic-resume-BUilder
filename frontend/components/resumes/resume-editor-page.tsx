@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ArrowLeft, Download, Eye, History, Save, Trash2, Wand2 } from "lucide-react";
@@ -16,6 +17,7 @@ type JobTarget = { title: string; description: string; method: string; note: str
 type Snapshot = { source?: string; imported_text?: string; profile?: { headline?: string | null; bio?: string | null }; resume_meta?: { hidden_sections?: string[]; design?: Design }; job_target?: JobTarget };
 
 const DEFAULT_DESIGN: Design = { accent: null, font: "theme", spacing: "comfortable", margin_mm: 17 };
+const PdfDocument = dynamic(() => import("./pdf-document"), { ssr: false, loading: () => <p className="p-3 text-xs text-muted" role="status">Loading document viewer…</p> });
 
 // Preview and download share the same immutable PDF bytes, including unsaved edits.
 function usePdfUrl(base64: string) {
@@ -32,7 +34,7 @@ function usePdfUrl(base64: string) {
 
 function PdfThumbnail({ pdf, name }: { pdf: string; name: string }) {
   const url = usePdfUrl(pdf);
-  return url ? <iframe loading="lazy" title={`${name} document thumbnail`} aria-hidden tabIndex={-1} src={`${url}#toolbar=0&navpanes=0&view=FitH`} className="pointer-events-none absolute left-0 top-0 h-[1000px] w-[700px] origin-top-left scale-[0.27]" /> : null;
+  return url ? <span aria-hidden className="pointer-events-none block"><PdfDocument src={url} title={`${name} document thumbnail`} thumbnail /></span> : null;
 }
 
 export function ResumeEditorPage({ resumeId }: { resumeId: string }) {
@@ -63,6 +65,10 @@ export function ResumeEditorPage({ resumeId }: { resumeId: string }) {
   const snapshot = resume?.latest_version?.content_snapshot as Snapshot | undefined;
   const imported = snapshot?.source === "document_import";
   const jobTarget = snapshot?.job_target;
+  const hasUnsavedContent = !!resume && (imported
+    ? text !== (snapshot?.imported_text ?? "")
+    : headline !== (snapshot?.profile?.headline ?? "") || summary !== (snapshot?.profile?.bio ?? "")
+      || JSON.stringify([...hidden].sort()) !== JSON.stringify([...(snapshot?.resume_meta?.hidden_sections ?? [])].sort()));
   const load = useCallback(async () => {
     setError("");
     try {
@@ -97,6 +103,7 @@ export function ResumeEditorPage({ resumeId }: { resumeId: string }) {
 
   useEffect(() => {
     if (!resume || !templates.length) return;
+    if (imported && text.trim().length < 80) { setThumbs({}); return; }
     const controller = new AbortController();
     const timer = setTimeout(() => {
       void Promise.all(templates.map(template => apiRequest<{ pdf_base64: string }>("/resumes/preview", { method: "POST", body: JSON.stringify({ template_id: template.id, base_resume_id: resumeId, edits, include_pdf: true }), signal: controller.signal })
@@ -104,7 +111,7 @@ export function ResumeEditorPage({ resumeId }: { resumeId: string }) {
         .then(pairs => { if (!controller.signal.aborted) setThumbs(Object.fromEntries(pairs)); });
     }, 1200);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [resume, templates, resumeId, edits, previewAttempt]);
+  }, [resume, templates, resumeId, edits, previewAttempt, imported, text]);
 
   async function save() {
     setSaving(true); setError(""); setNotice("");
@@ -119,6 +126,7 @@ export function ResumeEditorPage({ resumeId }: { resumeId: string }) {
   }
 
   async function createTargeted() {
+    if (hasUnsavedContent) { setError("Save your content changes before creating a job-specific draft."); return; }
     setSaving(true); setError(""); setNotice("");
     try {
       const created = await apiRequest<Resume>("/resumes", { method: "POST", body: JSON.stringify({
@@ -218,7 +226,8 @@ export function ResumeEditorPage({ resumeId }: { resumeId: string }) {
           <p className="mt-2 text-sm leading-6 text-muted">Creates a new job-specific resume from this one. It reorders and tightens only your own evidence, reports anything the job asks for that you have not listed, and never invents experience, skills or credentials.</p>
           <label className="mt-4 block text-sm font-medium">Target job title<Input className="mt-2" maxLength={120} placeholder="e.g. Senior Platform Engineer" value={jobTitle} onChange={event => setJobTitle(event.target.value)} /></label>
           <label className="mt-4 block text-sm font-medium">Job description<textarea className="mt-2 min-h-[160px] w-full rounded-lg border p-3 text-sm leading-6" maxLength={30000} placeholder="Paste the requirements from the role." value={jobDescription} onChange={event => setJobDescription(event.target.value)} /></label>
-          <Button className="mt-4" onClick={() => void createTargeted()} disabled={saving || jobTitle.trim().length < 2 || jobDescription.trim().length < 20}><Wand2 size={16} />{saving ? "Creating…" : "Create job-specific draft"}</Button>
+          {hasUnsavedContent && <p className="mt-3 text-xs leading-5 text-amber-800" role="status">Save your content changes before tailoring. The new draft uses your saved version.</p>}
+          <Button className="mt-4" onClick={() => void createTargeted()} disabled={saving || hasUnsavedContent || jobTitle.trim().length < 2 || jobDescription.trim().length < 20}><Wand2 size={16} />{saving ? "Creating…" : "Create job-specific draft"}</Button>
         </Card>
 
         <Card className="mt-6 p-6"><p className="text-xs font-semibold uppercase tracking-wider text-brand">A little clarity</p><h2 className="mt-3 text-xl font-semibold tracking-tight">Show the impact.<br />Keep it true.</h2><ul className="mt-5 space-y-4 text-sm leading-7 text-muted"><li>Lead with what you did, not just what the role involved.</li><li>Add scale or outcomes when you can back them up.</li><li>Keep the strongest, most relevant examples near the top.</li><li>Don’t add skills or accomplishments just to match a job description.</li></ul><Button asChild variant="secondary" className="mt-6"><Link href="/review">Check another resume</Link></Button>{!imported && <p className="mt-5 text-xs leading-6 text-muted">Need to update roles or education? <Link href="/passport" className="text-brand underline">Edit your career profile</Link>.</p>}</Card>
@@ -232,7 +241,7 @@ export function ResumeEditorPage({ resumeId }: { resumeId: string }) {
         {previewError && <Notice>{previewError}</Notice>}
         <Button variant="ghost" className="mt-3" onClick={() => setPreviewAttempt(attempt => attempt + 1)}>Retry document previews</Button>
         {previewUrl && !currentPdfUrl && !previewError && <p className="mt-3 text-xs text-muted" role="status">Updating the document… Download is available when the current draft is ready.</p>}
-        {previewUrl ? <><iframe title="Live resume preview" src={`${previewUrl}#toolbar=0&navpanes=0&view=FitH`} className="mt-4 h-[860px] w-full rounded-xl border bg-white" /><a href={previewUrl} target="_blank" rel="noreferrer" className="mt-3 inline-block text-xs text-brand underline">Open the actual PDF in a new tab</a></> : <div className="mt-4 flex h-[320px] items-center justify-center rounded-xl border bg-white text-sm text-muted" role="status">Rendering preview…</div>}
+        {previewUrl ? <><div className="mt-4"><PdfDocument src={previewUrl} title="Live resume preview" /></div><a href={previewUrl} target="_blank" rel="noreferrer" className="mt-3 inline-block text-xs text-brand underline">Open the actual PDF in a new tab</a></> : <div className="mt-4 flex h-[320px] items-center justify-center rounded-xl border bg-white text-sm text-muted" role="status">Rendering preview…</div>}
       </Card>
     </div>
   </ResumeShell>;
@@ -266,7 +275,7 @@ export function ResumePreviewPage({ resumeId }: { resumeId: string }) {
     void apiRequest<{ pdf_base64: string }>(`/resumes/${resumeId}/preview?include_pdf=true${version ? `&version_id=${encodeURIComponent(version)}` : ""}`, { signal: controller.signal }).then(setPreview).catch(caught => { if (!controller.signal.aborted) setError(caught instanceof ApiError ? caught.message : "Could not load preview."); });
     return () => controller.abort();
   }, [resumeId, version]);
-  return <ResumeShell title="Ready for a closer look." description="Review the actual saved PDF before you send it."><div className="flex flex-wrap justify-between gap-3"><Link className="text-sm text-brand underline" href={`/resumes/${resumeId}`}>← Back to editor</Link><Button asChild variant="secondary"><a href={`${apiBaseUrl}/resumes/${resumeId}/pdf${version ? `?version_id=${encodeURIComponent(version)}` : ""}`}><Download size={16} />Download this version</a></Button></div>{error && <Notice>{error}</Notice>}{!preview && !error && <Card className="mt-6 p-8">Loading preview…</Card>}{pdfUrl && <iframe title="Saved resume preview" src={`${pdfUrl}#toolbar=0&navpanes=0&view=FitH`} className="mt-6 h-[1000px] w-full rounded-xl border bg-white" />}</ResumeShell>;
+  return <ResumeShell title="Ready for a closer look." description="Review the actual saved PDF before you send it."><div className="flex flex-wrap justify-between gap-3"><Link className="text-sm text-brand underline" href={`/resumes/${resumeId}`}>← Back to editor</Link><Button asChild variant="secondary"><a href={`${apiBaseUrl}/resumes/${resumeId}/pdf${version ? `?version_id=${encodeURIComponent(version)}` : ""}`}><Download size={16} />Download this version</a></Button></div>{error && <Notice>{error}</Notice>}{!preview && !error && <Card className="mt-6 p-8">Loading preview…</Card>}{pdfUrl && <div className="mt-6"><PdfDocument src={pdfUrl} title="Saved resume preview" /></div>}</ResumeShell>;
 }
 
 function formatDate(value: string) { return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)); }

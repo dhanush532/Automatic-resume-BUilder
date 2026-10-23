@@ -4,7 +4,7 @@ from copy import deepcopy
 from typing import Any
 
 from app.services.ai import AIProviderUnavailable, get_ai_provider
-from app.services.resume_document import BULLET, imported_document
+from app.services.resume_document import BULLET, imported_document, project_block_has_title
 from app.services.resume_review import find_evidenced_skills, find_skills
 from app.services.resume_themes import recommended_theme
 
@@ -108,9 +108,7 @@ def tailor_snapshot(source, title, description):
                 if section["key"] == "projects":
                     # Reorder only explicit title+bullet project blocks. Ambiguous
                     # prose and chronology retain their original positions.
-                    movable = [index for index, block in enumerate(blocks)
-                               if len(clean := [line for line in block if line.strip()]) > 1
-                               and not BULLET.match(clean[0]) and BULLET.match(clean[1])]
+                    movable = [index for index, block in enumerate(blocks) if project_block_has_title(block)]
                     ranked = sorted((blocks[index] for index in movable), key=relevance, reverse=True)
                     for index, block in zip(movable, ranked, strict=True):
                         blocks[index] = block
@@ -165,9 +163,12 @@ def tailor_snapshot(source, title, description):
             if not isinstance(edit, dict):
                 continue
             section, field = edit.get("section"), edit.get("field")
+            source_id = edit.get("source_id")
+            if not isinstance(section, str) or not isinstance(field, str) or not isinstance(source_id, str) or not source_id.strip():
+                continue
             if section not in {"experience", "projects", "achievements"} or field not in {"description", "achievements", "results", "features"}:
                 continue
-            original = next((item for item in source.get(section, []) if item.get("source_id") == edit.get("source_id")), None)
+            original = next((item for item in source.get(section, []) if item.get("source_id") == source_id), None)
             replacement = edit.get("text")
             if not original or not isinstance(replacement, str) or len(replacement) > 5000:
                 continue
@@ -180,7 +181,7 @@ def tailor_snapshot(source, title, description):
             # Preserve negation and metrics as well as word order.
             if normalized(replacement) != normalized(original.get(field, "")) or re.findall(r"\d+(?:\.\d+)?%?", replacement) != re.findall(r"\d+(?:\.\d+)?%?", str(original.get(field, ""))):
                 continue
-            destination = next((item for item in result.get(section, []) if item.get("source_id") == edit["source_id"]), None)
+            destination = next((item for item in result.get(section, []) if item.get("source_id") == source_id), None)
             if destination is None:
                 continue
             destination[field] = replacement.strip()

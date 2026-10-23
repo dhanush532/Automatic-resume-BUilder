@@ -138,7 +138,10 @@ def test_verified_scope_and_outcomes_are_recognized(text):
     assert has_impact_evidence(text)
 
 
-@pytest.mark.parametrize("proposed", (None, [], {"bullet_rewrites": None}, {"bullet_rewrites": [None, "bad", {}]}))
+@pytest.mark.parametrize("proposed", (None, [], {"bullet_rewrites": None}, {"bullet_rewrites": [None, "bad", {}]},
+                                     {"bullet_rewrites": [{"section": [], "field": "description", "source_id": "p1"}]},
+                                     {"bullet_rewrites": [{"section": "projects", "field": {}, "source_id": "p1"}]},
+                                     {"bullet_rewrites": [{"section": "projects", "field": "description", "source_id": None}]}))
 def test_malformed_provider_output_keeps_grounded_draft(monkeypatch, proposed):
     class Provider:
         def customize_resume(self, **kwargs):
@@ -154,6 +157,21 @@ def test_inline_required_and_preferred_headings_are_separated():
     result = analyze_job("Engineer", "Required: Python. Preferred: Docker. Responsibilities: Build APIs.", "Python projects")
     assert result["required_qualifications"] == ["Required: Python."]
     assert result["preferred_qualifications"] == ["Preferred: Docker."]
+
+
+def test_provider_edit_without_record_id_cannot_match_an_unidentified_record(monkeypatch):
+    source = quality_snapshot(False)
+    source["projects"][0].pop("source_id")
+    original = source["projects"][0]["description"]
+
+    class Provider:
+        def customize_resume(self, **kwargs):
+            return {"bullet_rewrites": [{"section": "projects", "field": "description", "text": original}]}
+
+    monkeypatch.setattr("app.services.resume_tailoring.get_ai_provider", lambda: Provider())
+    result = tailor_snapshot(source, "Backend engineer", "Build Python services with FastAPI and PostgreSQL.")
+    assert result["job_target"]["method"] == "grounded_rules"
+    assert next(item for item in result["projects"] if not item.get("source_id"))["description"] == original
 
 
 def test_html_bullet_character_is_a_css_escape_not_a_control_character():

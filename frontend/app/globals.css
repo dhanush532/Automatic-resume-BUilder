@@ -29,6 +29,22 @@ button, a, input, select, textarea {
   background: #d3f5b0;
 }
 
+/* Resume studio: restrained surfaces and motion, isolated from other workspaces. */
+.resume-workspace { background: #f3f5ef; }
+.resume-workspace-heading { border: 1px solid #dce3d5; border-radius: 22px; padding: clamp(24px, 4vw, 42px); background: #fafbf8; box-shadow: 0 8px 28px #173c3205; }
+.resume-workspace fieldset { min-width: 0; }
+.resume-workspace label:has(input[type="radio"]) { transition: border-color .2s, background-color .2s, box-shadow .2s, transform .2s; }
+.resume-workspace label:has(input[type="radio"]:checked) { background: #edf4e7; border-color: #173c32; box-shadow: 0 0 0 1px #173c32; }
+.resume-workspace iframe { box-shadow: 0 12px 32px #173c320a; }
+.resume-workspace button, .resume-workspace a { transition: background-color .2s, color .2s, transform .2s; }
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .resume-workspace label:has(input[type="radio"]):hover { transform: translateY(-2px); box-shadow: 0 8px 20px #173c320b; }
+  .resume-workspace button:not(:disabled):active { transform: scale(.98); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .resume-workspace *, .resume-workspace *::before, .resume-workspace *::after { transition: none !important; animation: none !important; }
+}
+
 html { scroll-behavior: smooth; scroll-padding-top: 90px; }
 button:not(:disabled), summary { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .55; }
