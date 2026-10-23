@@ -1,4 +1,5 @@
 from app.models.account_security import AuthRateBucket, EmailChallenge, OAuthAttempt
+from app.models.interview import InterviewSession
 from app.models.jobs import Company, Job, JobSkill, JobSource, SavedJob
 from app.models.passport import (
     Achievement,
@@ -28,6 +29,7 @@ from app.models.user import (
 )
 
 __all__ = [
+    "InterviewSession",
     "AuthRateBucket",
     "EmailChallenge",
     "OAuthAttempt",

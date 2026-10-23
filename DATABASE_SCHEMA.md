@@ -1,5 +1,15 @@
 # CareerPilot database schema
 
+## Mock interview migration: `20261023_0010`
+
+`interview_sessions` is an additive table keyed by UUID and owned by an existing
+user (`ON DELETE CASCADE`). An optional resume reference uses `ON DELETE SET NULL`.
+It stores role, minimized career context, job description, bounded interview
+configuration, model, JSONB question/answer/evaluation turns, lifecycle status,
+server elapsed time and optimistic revision. An owner/created-time index supports
+private history. No webcam recordings or audio blobs are stored. See
+[INTERVIEW_PLATFORM.md](INTERVIEW_PLATFORM.md) for endpoints and migration rollout.
+
 ## Authentication/email migrations
 
 `20261013_0007` retains UUIDs, removes phone uniqueness, adds normalized-email uniqueness, account state, recent-auth timestamps, email challenges, OAuth attempts and shared API rate buckets. `20261013_0008` adds encrypted email deliveries with status/attempts/scheduling/leases/provider receipt/error category. `20261013_0009` normalizes historical email casing/whitespace without changing identities. None of the earlier migrations is rewritten. A UUID tombstone is retained only after an explicit owner-requested deletion.

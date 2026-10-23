@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     docs_enabled: bool = True
     job_source_config: str = ""
     job_freshness_hours: int = Field(default=72, ge=1, le=720)
+    gemini_api_key: str | None = Field(default=None, repr=False)
+    gemini_interview_model: str = Field(default="gemini-3.8-flash", pattern=r"^[a-zA-Z0-9.-]+$")
 
     @field_validator("job_source_config")
     @classmethod

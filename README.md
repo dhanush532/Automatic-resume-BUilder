@@ -12,6 +12,16 @@ Authentication/email upgrade setup: [AUTHENTICATION_AND_EMAIL.md](AUTHENTICATION
 
 CareerPilot is a career workspace built around a user-owned **Career Passport**. Milestones 1–5 are preserved; M6 adds Arbeitnow discovery, freshness and verification evidence. See [MILESTONE_6_AUDIT.md](MILESTONE_6_AUDIT.md), [ROADMAP.md](ROADMAP.md), and [MILESTONE_6_REPORT.md](MILESTONE_6_REPORT.md). This is local development software, not a production-ready autonomous application agent.
 
+## Mock interview studio
+
+Visit `/interviews` after signing in. It reuses saved resumes and supports PDF
+uploads, Gemini-generated adaptive questions, webcam preview, browser dictation
+and text answers, private reports, history and retakes. Set backend-only
+`GEMINI_API_KEY` and `GEMINI_INTERVIEW_MODEL`, review the additive interview
+migration, and follow [INTERVIEW_PLATFORM.md](INTERVIEW_PLATFORM.md) for research,
+configuration, verification and browser/provider limitations. Generation is
+disabled when the key is absent; no fake AI scores are returned.
+
 ## Prerequisites
 
 - Node.js 20+ and npm
@@ -61,7 +71,7 @@ backend:  uv run alembic check
 frontend: npm audit --omit=dev
 ```
 
-Existing APIs and routes are preserved. `GET /api/v1/jobs/sources` distinguishes configured/enabled adapters and shows source health. Job responses add trust, manual application mode and link availability. No public sync endpoint exists. Email/reset delivery and Google/GitHub/LinkedIn authentication are implemented but require real provider credentials before use. External AI and application submission remain unconfigured/unimplemented. M7 has not started.
+Existing APIs and routes are preserved. `GET /api/v1/jobs/sources` distinguishes configured/enabled adapters and shows source health. Job responses add trust, manual application mode and link availability. No public sync endpoint exists. Email/reset delivery and Google/GitHub/LinkedIn authentication are implemented but require real provider credentials before use. Interview AI is implemented behind a Gemini credential gate; the separate resume AI provider remains unconfigured. Autonomous application submission remains unimplemented. M7 has not started.
 
 Tests use real development PostgreSQL with per-test transactions/savepoints; application commits are rolled back. Mock integrations never submit real applications. Local `.checkpoints/` archives/database dumps are private and ignored; never publish them.
 

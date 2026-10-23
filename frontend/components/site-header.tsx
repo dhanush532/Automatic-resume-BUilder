@@ -6,7 +6,7 @@ import { ArrowUpRight, Command, LogOut, Menu, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { apiRequest, type PublicUser } from "@/lib/api";
 
-const links = [["/review", "Resume check"], ["/resumes", "My resumes"], ["/passport", "Career profile"], ["/jobs", "Find jobs"]];
+const links = [["/review", "Resume check"], ["/resumes", "My resumes"], ["/passport", "Career profile"], ["/jobs", "Find jobs"], ["/interviews", "Mock interviews"]];
 
 export function SiteHeader() {
   const path = usePathname();
