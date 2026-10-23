@@ -30,6 +30,7 @@ def create_application() -> FastAPI:
         lifespan=lifespan,
     )
     app.add_middleware(ReviewBodyLimit, prefix=f"{settings.api_prefix}/review")
+    app.add_middleware(ReviewBodyLimit, prefix=f"{settings.api_prefix}/interviews")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[settings.frontend_origin],

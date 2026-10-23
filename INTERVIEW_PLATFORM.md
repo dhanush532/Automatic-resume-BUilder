@@ -191,7 +191,7 @@ audio/WebSocket streaming, which would require different hosting and quotas.
 
 ## Verification
 
-- Full backend suite: **269 passed** (27 new interview tests); existing
+- Full backend suite: **270 passed** (28 new interview tests); existing
   Starlette/httpx deprecation warning only. Ruff passed.
 - Frontend lint, TypeScript, production build and **10 unit tests passed**.
   Full Playwright suite: **36 passed**, including **12 new interview browser
@@ -227,6 +227,7 @@ completed through the authorized operator workflow before activation.
 
 - `backend/app/{models,schemas}/interview.py`
 - `backend/app/services/interview_ai.py`
+- `backend/app/main.py`: interview request-body limits before upload spooling
 - `backend/app/api/routes/interviews.py`, API router registration
 - `backend/alembic/versions/20261023_0010_interviews.py`
 - `backend/app/core/config.py`, `.env.example`

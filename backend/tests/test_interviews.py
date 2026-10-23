@@ -278,3 +278,10 @@ def test_provider_timeout_is_explicit(monkeypatch):
         interview_ai.generate(Question, "Question", {})
     assert exc.value.status == 504
     assert "took too long" in str(exc.value)
+
+
+def test_interview_upload_and_json_are_bounded_before_parsing(client):
+    response = client.post("/api/v1/interviews/extract", files={"file": ("large.pdf", b"x" * (3 * 1024 * 1024 + 65536), "application/pdf")})
+    assert response.status_code == 413
+    response = client.post("/api/v1/interviews", content=b"x" * (512 * 1024 + 1), headers={"Content-Type": "application/json"})
+    assert response.status_code == 413
